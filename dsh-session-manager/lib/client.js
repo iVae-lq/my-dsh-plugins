@@ -276,6 +276,8 @@ function isTopmostDialog(z) {
       "oc.group.earlier": "更早",
       "oc.openInTab": "已在标签页打开",
       "oc.shortcut.label": "打开会话管理",
+      "oc.settings": "设置",
+      "oc.titleButton": "会话",
       "panel.close": "关闭",
       "row.open": "打开",
       "row.archive": "归档",
@@ -645,6 +647,8 @@ function isTopmostDialog(z) {
       "oc.group.earlier": "Earlier",
       "oc.openInTab": "Open in a tab",
       "oc.shortcut.label": "Open session manager",
+      "oc.settings": "Settings",
+      "oc.titleButton": "Sessions",
       "panel.close": "Close",
       "row.open": "Open",
       "row.archive": "Archive",
@@ -978,17 +982,19 @@ function isTopmostDialog(z) {
       ".sm-ocWrap{box-sizing:border-box;width:100%;max-width:1060px;height:100%;min-height:0;margin:0 auto;padding:20px 32px 0;display:grid;grid-template-columns:232px minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr);column-gap:48px}",
       ".sm-ocNarrow{box-sizing:border-box;width:100%;max-width:880px;height:100%;min-height:0;margin:0 auto;padding:16px 32px 0;display:flex;flex-direction:column}",
       ".sm-ocNarrow .sm-list{flex:1 1 auto;min-height:0}",
+      ".sm-ocSettings{overflow:auto;padding-bottom:24px}.sm-ocPanel .sm-ocSettings .sm-settingsCard,html[data-sm-translucent] .sm-ocPanel .sm-ocSettings .sm-settingsCard{background:transparent;border:0;box-shadow:none;-webkit-backdrop-filter:blur(0px);backdrop-filter:blur(0px);max-width:none;width:100%;padding:0}",
       ".sm-ocSearch{grid-column:2;grid-row:1;position:relative;display:flex;align-items:center;margin-bottom:24px}",
       ".sm-ocSearch svg{position:absolute;left:12px;color:var(--dsw-alias-label-tertiary);pointer-events:none}",
       ".sm-ocPanel .sm-ocSearch .sm-queryInput{height:36px;padding:0 12px 0 36px;border:0!important;border-radius:9px;background:var(--sm-oc-fill);font-size:13px}.sm-ocPanel .sm-ocSearch .sm-queryInput:hover{background:var(--sm-oc-fill-hover)}.sm-ocPanel .sm-ocSearch .sm-queryInput:focus-visible{outline:1.5px solid color-mix(in srgb,var(--dsw-alias-label-primary,#888) 35%,transparent)!important;outline-offset:0!important;background:var(--sm-oc-fill-hover)}",
-      ".sm-ocSide{grid-column:1;grid-row:2 / 4;min-height:0;min-width:0;display:flex;flex-direction:column;overflow:auto}",
+      ".sm-ocSide{grid-column:1;grid-row:2 / 4;min-height:0;min-width:0;display:flex;flex-direction:column;overflow:hidden}",
       ".sm-ocSideHead{display:flex;align-items:center;justify-content:space-between;flex:none;height:28px;margin-bottom:6px;padding:0 6px;color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:500}",
       ".sm-ocIconBtn,.sm-ocNew{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;border-radius:7px;font:inherit;font-size:13px;line-height:18px;transition:background .12s,color .12s}",
       ".sm-ocIconBtn{width:28px;height:28px;padding:0}.sm-ocNew{height:28px;padding:0 10px}",
       ".sm-ocIconBtn:hover,.sm-ocNew:hover:not(:disabled){background:var(--sm-oc-fill-hover);color:var(--dsw-alias-label-primary)}.sm-ocNew:disabled{opacity:.5;cursor:not-allowed}",
-      ".sm-ocProjects{display:flex;flex-direction:column;gap:2px;min-width:0;padding-bottom:16px}",
-      ".sm-ocProjectItem{display:flex;align-items:center;gap:10px;min-width:0;height:32px;padding:0 8px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;line-height:18px;text-align:left;cursor:pointer;transition:background .12s,color .12s}",
-      ".sm-ocProjectItem:hover{background:var(--sm-oc-fill);color:var(--dsw-alias-label-primary)}.sm-ocProjectItem.sm-on{background:var(--sm-oc-fill-active);color:var(--dsw-alias-label-primary)}.sm-ocProjectItem:focus-visible{outline:1.5px solid color-mix(in srgb,var(--dsw-alias-label-primary,#888) 35%,transparent);outline-offset:-1.5px}",
+      ".sm-ocProjects{display:flex;flex-direction:column;flex:0 1 auto;gap:2px;min-width:0;min-height:0;overflow:auto}",
+      ".sm-ocSideFoot{flex:none;display:flex;flex-direction:column;gap:2px;margin-top:28px;padding-bottom:16px}.sm-ocFootBtn svg{flex:none;color:var(--dsw-alias-label-secondary)}.sm-ocFootBtn{width:100%}",
+      ".sm-ocProjectItem,.sm-ocFootBtn{display:flex;align-items:center;gap:10px;min-width:0;height:32px;padding:0 8px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;line-height:18px;text-align:left;cursor:pointer;transition:background .12s,color .12s}",
+      ".sm-ocProjectItem:hover,.sm-ocFootBtn:hover{background:var(--sm-oc-fill);color:var(--dsw-alias-label-primary)}.sm-ocProjectItem.sm-on{background:var(--sm-oc-fill-active);color:var(--dsw-alias-label-primary)}.sm-ocProjectItem:focus-visible,.sm-ocFootBtn:focus-visible{outline:1.5px solid color-mix(in srgb,var(--dsw-alias-label-primary,#888) 35%,transparent);outline-offset:-1.5px}",
       ".sm-ocProjectName{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
       ".sm-ocBadge{flex:none;width:16px;height:16px;border-radius:4px;display:inline-grid;place-items:center;background:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 34%,transparent);color:var(--dsw-alias-label-primary,#fff);font-size:10px;font-weight:700;line-height:1;text-transform:uppercase}",
       ".sm-ocProjectItem.sm-on .sm-ocBadge{background:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 52%,transparent)}",
@@ -1015,11 +1021,11 @@ function isTopmostDialog(z) {
       ".sm-ocPanel .sm-tagChip,.sm-ocPanel .sm-priorityBadge{background:var(--sm-oc-fill-hover)}.sm-ocPanel .sm-rowMeta{color:var(--dsw-alias-label-tertiary)}",
       ".sm-ocTabMark{position:absolute;left:0;top:11px;bottom:11px;width:2px;border-radius:1px;background:var(--dsw-alias-label-tertiary)}",
       // Thin overlay-style scrollbars (Chromium): the thumb only shows while hovering the scroll area.
-      ".sm-ocPanel .sm-ocSide::-webkit-scrollbar,.sm-ocPanel .sm-list::-webkit-scrollbar{width:10px;height:10px;background:transparent}",
-      ".sm-ocPanel .sm-ocSide::-webkit-scrollbar-track,.sm-ocPanel .sm-list::-webkit-scrollbar-track,.sm-ocPanel .sm-ocSide::-webkit-scrollbar-corner,.sm-ocPanel .sm-list::-webkit-scrollbar-corner{background:transparent}",
-      ".sm-ocPanel .sm-ocSide::-webkit-scrollbar-thumb,.sm-ocPanel .sm-list::-webkit-scrollbar-thumb{min-height:36px;border:3px solid transparent;border-radius:999px;background-color:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 24%,transparent);background-clip:padding-box}",
-      ".sm-ocPanel .sm-ocSide::-webkit-scrollbar-thumb:hover,.sm-ocPanel .sm-list::-webkit-scrollbar-thumb:hover{background-color:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 42%,transparent);background-clip:padding-box}",
-      ".sm-ocPanel .sm-ocSide:not(:hover)::-webkit-scrollbar-thumb,.sm-ocPanel .sm-list:not(:hover)::-webkit-scrollbar-thumb{background-color:transparent}",
+      ".sm-ocPanel .sm-ocProjects::-webkit-scrollbar,.sm-ocPanel .sm-list::-webkit-scrollbar{width:10px;height:10px;background:transparent}",
+      ".sm-ocPanel .sm-ocProjects::-webkit-scrollbar-track,.sm-ocPanel .sm-list::-webkit-scrollbar-track,.sm-ocPanel .sm-ocProjects::-webkit-scrollbar-corner,.sm-ocPanel .sm-list::-webkit-scrollbar-corner{background:transparent}",
+      ".sm-ocPanel .sm-ocProjects::-webkit-scrollbar-thumb,.sm-ocPanel .sm-list::-webkit-scrollbar-thumb{min-height:36px;border:3px solid transparent;border-radius:999px;background-color:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 24%,transparent);background-clip:padding-box}",
+      ".sm-ocPanel .sm-ocProjects::-webkit-scrollbar-thumb:hover,.sm-ocPanel .sm-list::-webkit-scrollbar-thumb:hover{background-color:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 42%,transparent);background-clip:padding-box}",
+      ".sm-ocPanel .sm-ocProjects:not(:hover)::-webkit-scrollbar-thumb,.sm-ocPanel .sm-list:not(:hover)::-webkit-scrollbar-thumb{background-color:transparent}",
       // Right-click menu for a session row (portaled to the overlay root, above the page).
       ".sm-ocCtxMenu{position:fixed;z-index:10000;box-sizing:border-box;min-width:176px;max-width:280px;padding:4px;border-radius:10px;border:.5px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));background:color-mix(in srgb,var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-base,#26262b)) 94%,transparent);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 8px 28px rgba(0,0,0,.28);color:var(--dsw-alias-label-primary,#111);font-size:13px;line-height:18px;user-select:none;-webkit-user-select:none}",
       ".sm-ocCtxItem{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;text-align:left;white-space:nowrap;cursor:pointer;outline:none}",
@@ -5912,9 +5918,19 @@ function isTopmostDialog(z) {
           if (s.bulkPreview || s.bulkProgress || s.bulkResult || s.bulkTagDraft || s.bulkPresetDraft) return;
           if (typeof updateStore !== "undefined" && updateStore && typeof updateStore.getSnapshot === "function" && updateStore.getSnapshot()?.dialogOpen) return;
           if (activeDialogZStack && activeDialogZStack.length > 0) return;
+          // A control that unmounts while it is clicked (e.g. "reset filters" disappears once
+          // the filters are cleared) is already detached when this window-level listener runs,
+          // so `contains`/`closest` on e.target miss it and the whole page used to close.
+          // The event path is captured at dispatch time and still lists the original ancestors.
+          const insideSelector = ".sm-nativeDialog, .sm-panelDialog, .sm-bulkDialog, .sm-annotationDialog, .sm-annotationSurface, .sm-tooltip, .sm-footerBtn, .sm-ocCtxMenu, [data-windows-menu]";
+          const path = typeof e.composedPath === "function" ? e.composedPath() : [];
+          if (path.length > 0) {
+            if (panelRef.current && path.includes(panelRef.current)) return;
+            if (path.some(node => node && typeof node.matches === "function" && node.matches(insideSelector))) return;
+          }
           if (panelRef.current && typeof panelRef.current.contains === "function" && panelRef.current.contains(e.target)) return;
           if (e.target && typeof e.target.closest === "function") {
-            if (e.target.closest(".sm-nativeDialog, .sm-panelDialog, .sm-bulkDialog, .sm-annotationDialog, .sm-annotationSurface, .sm-tooltip, .sm-footerBtn, .sm-ocCtxMenu")) return;
+            if (e.target.closest(insideSelector)) return;
           }
           s.onPanelClose();
         };
@@ -6136,6 +6152,8 @@ function isTopmostDialog(z) {
               ),
               error ? h("div", { className: "sm-error", role: "alert" }, t("error.operation", { message: error })) : null,
               workspaceRowsList
+            ) : panelTab === "settings" ? h("div", { className: "sm-ocNarrow sm-ocSettings" },
+              h(SessionManagerSettingsCard, { t })
             ) : h("div", { className: "sm-ocWrap" },
               h("div", { className: "sm-ocSearch" },
                 h("svg", { viewBox: "0 0 16 16", width: 16, height: 16, fill: "none", stroke: "currentColor", strokeWidth: 1.3, strokeLinecap: "round", "aria-hidden": "true" },
@@ -6164,6 +6182,16 @@ function isTopmostDialog(z) {
                     .filter(workspace => !workspaceArchiveStore.isArchived(workspace.id) || workspaceFilter === workspaceValue(workspace.id))
                     .map(workspace => renderProjectItem(workspaceValue(workspace.id), workspace.title || workspace.name || workspace.id, workspace.path)),
                   hasUngroupedRows ? renderProjectItem("ungrouped", t("panel.workspace.ungrouped")) : null
+                ),
+                h("div", { className: "sm-ocSideFoot" },
+                  h("button", {
+                    type: "button", className: "sm-ocFootBtn",
+                    onClick: () => setPanelTab("settings")
+                  },
+                    h("svg", { viewBox: "0 0 16 16", width: 16, height: 16, fill: "none", stroke: "currentColor", strokeWidth: 1.2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" },
+                      h("circle", { cx: 8, cy: 8, r: 2.1 }),
+                      h("path", { d: "M8 1.8v1.5M8 12.7v1.5M14.2 8h-1.5M3.3 8H1.8M12.4 3.6l-1.06 1.06M4.66 11.34 3.6 12.4M12.4 12.4l-1.06-1.06M4.66 4.66 3.6 3.6" })),
+                    h("span", { className: "sm-ocProjectName" }, t("oc.settings")))
                 )
               ),
               h("div", { className: "sm-ocMainHead" },
@@ -7840,6 +7868,64 @@ function isTopmostDialog(z) {
           console.warn("session-manager: shortcut service unavailable", error);
         }
       }
+
+      // "Sessions" button in the Windows title bar, right of the "Application / Edit" text menu.
+      // The desktop shell draws that menu inside an open shadow root (div[data-windows-menu]);
+      // appending one more <button> to its menubar makes size, spacing and hover colour match
+      // exactly. Shown only where the shell marks the document with data-windows-titlebar.
+      ctx.effect(() => {
+        const root = typeof document !== "undefined" ? document.documentElement : null;
+        if (!root || typeof root.hasAttribute !== "function" || !root.hasAttribute("data-windows-titlebar")) return undefined;
+        let button = null;
+        let style = null;
+        let timer = null;
+        const unsubscribers = [];
+        const labelText = () => {
+          try { return ctx.locale.bind(NS)("oc.titleButton"); } catch (_) { return "Sessions"; }
+        };
+        const sync = () => {
+          if (!button) return;
+          const open = panelStore.getSnapshot();
+          button.textContent = labelText();
+          button.setAttribute("aria-pressed", open ? "true" : "false");
+        };
+        const detach = () => {
+          if (button) { try { button.remove(); } catch (_) {} button = null; }
+          if (style) { try { style.remove(); } catch (_) {} style = null; }
+        };
+        const attach = () => {
+          const host = document.querySelector("[data-windows-menu]");
+          const bar = host && host.shadowRoot ? host.shadowRoot.querySelector("[role=menubar]") : null;
+          if (!bar) return;
+          if (button && button.parentNode === bar) return;
+          detach();
+          style = document.createElement("style");
+          style.textContent = "button[data-sm-sessions][aria-pressed=true]{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}";
+          host.shadowRoot.appendChild(style);
+          button = document.createElement("button");
+          button.type = "button";
+          button.setAttribute("data-sm-sessions", "");
+          button.setAttribute("role", "menuitem");
+          button.tabIndex = -1;
+          // Same as the shell's own menu buttons: do not steal focus from the editor.
+          button.addEventListener("pointerdown", (event) => { event.preventDefault(); });
+          button.addEventListener("mousedown", (event) => { event.preventDefault(); });
+          button.addEventListener("click", () => { panelStore.toggle(); });
+          bar.appendChild(button);
+          sync();
+        };
+        attach();
+        // The shell mounts its menu after the first frame; keep checking (cheap) so a late or
+        // replaced menu bar still receives the button.
+        timer = setInterval(attach, 500);
+        unsubscribers.push(panelStore.subscribe(sync));
+        try { if (ctx.locale && typeof ctx.locale.subscribe === "function") unsubscribers.push(ctx.locale.subscribe(sync)); } catch (_) {}
+        return () => {
+          if (timer !== null) clearInterval(timer);
+          for (const off of unsubscribers) { try { if (typeof off === "function") off(); } catch (_) {} }
+          detach();
+        };
+      }, "session-manager: title bar button");
 
       // Keep <html data-sm-theme> in step with DSH through the official theme
       // event. ui-layout's ThemePresenter subscribes to the same event and

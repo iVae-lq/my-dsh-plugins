@@ -221,3 +221,37 @@ test("issue #28: archived-only filters keep working with the portaled panel", as
   await app.click("未归档");
   assert.deepEqual(app.rowIds(), ["s1", "s2"], "the active filter must hide it again");
 });
+
+test("a clicked control that unmounts (e.g. 'reset filters') does not dismiss the page: the event path decides", async () => {
+  const app = mount();
+  await new Promise(resolve => setTimeout(resolve, 70)); // the page ignores clicks during its first 50ms
+  // The target is already detached by the time the window listener runs; only the
+  // dispatch-time path still lists the panel as an ancestor.
+  const detached = { closest: () => null };
+  app.dispatchClick(detached, { composedPath: () => [detached, { matches: selector => selector.includes(".sm-panelDialog") }] });
+  assert.equal(app.isOpen(), true, "a click that started inside the page must keep it open");
+  app.dispatchClick(detached, { composedPath: () => [detached] });
+  assert.equal(app.isOpen(), false, "a genuine outside click still closes the page");
+});
+
+test("the project column ends with a Settings entry that opens the plugin settings inside the page", async () => {
+  const app = mount({ workspaces: [{ id: "w1", title: "One", path: "/p/one", sessionIds: ["s1"] }] });
+  const foot = nodes(app.tree[0], n => n.props?.className === "sm-ocSideFoot")[0];
+  assert.ok(foot, "the side column must have a footer");
+  const button = nodes(foot, n => n.type === "button" && n.props?.className === "sm-ocFootBtn")[0];
+  assert.ok(button, "footer must hold the settings button");
+  assert.equal(text(button), app.t("oc.settings"));
+  assert.equal(nodes(app.tree[0], n => n.type?.name === "SessionManagerSettingsCard").length, 0, "settings are not shown until requested");
+  button.props.onClick();
+  await app.flush();
+  assert.equal(nodes(app.tree[0], n => n.type?.name === "SessionManagerSettingsCard").length, 1, "settings page renders the settings card");
+  assert.equal(nodes(app.tree[0], n => n.props?.className === "sm-ocSide").length, 0, "the project column belongs to the sessions page");
+});
+
+test("a 'Sessions' button is added to the Windows title bar menu (source guard)", () => {
+  const source = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
+  assert.match(source, /\[data-windows-menu\]/, "targets the shell's title bar menu host");
+  assert.match(source, /session-manager: title bar button/);
+  assert.match(source, /"oc\.titleButton"/);
+  assert.match(source, /button\.addEventListener\("click", \(\) => \{ panelStore\.toggle\(\); \}\)/, "the button toggles the session page");
+});

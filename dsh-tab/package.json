@@ -47,6 +47,7 @@
   "scripts": {
     "check": "node --check client.js && node --check index.js",
     "docs:mock": "node scripts/make-demo.mjs",
+    "test": "node --test",
     "prepublishOnly": "npm run check"
   },
   "engines": {

@@ -50,6 +50,11 @@ window.__ModuleLoader__.load({
       'tab.list': '会话标签页',
       'tab.new': '新建会话',
       'tab.more': '更多标签页',
+      'settings.title': '会话标签页',
+      'settings.autoMaximize': '启动自动最大化',
+      'settings.autoMaximize.hint': '每次启动桌面端时自动把窗口最大化（仅 Windows 桌面端）',
+      'settings.autoHideSidebar': '自动隐藏侧边栏',
+      'settings.autoHideSidebar.hint': '每次启动时自动收起左侧边栏，改用标签栏和会话管理切换会话',
       'tab.newSession': '新会话',
       'tab.untitled': '未命名',
       'tab.close': '关闭标签页：{title}',
@@ -76,6 +81,11 @@ window.__ModuleLoader__.load({
       'tab.list': 'Conversation tabs',
       'tab.new': 'New conversation',
       'tab.more': 'More tabs',
+      'settings.title': 'Conversation tabs',
+      'settings.autoMaximize': 'Maximize on startup',
+      'settings.autoMaximize.hint': 'Maximize the window each time the desktop app starts (Windows desktop only)',
+      'settings.autoHideSidebar': 'Auto-hide sidebar',
+      'settings.autoHideSidebar.hint': 'Collapse the left sidebar each time the app starts; switch sessions from the tab bar and session manager',
       'tab.newSession': 'New session',
       'tab.untitled': 'Untitled',
       'tab.close': 'Close tab: {title}',
@@ -166,6 +176,10 @@ html[data-windows-titlebar] .dsh-tab-pagebar{top:0;
   left:var(--dsh-tab-titlebar-left, 260px);
   right:calc(max(138px, 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)) + 8px);
   padding:0;background:transparent;box-shadow:none;border-radius:0}
+/* 最左边的分隔线：把标题栏左侧的控件和标签隔开（仅标题栏模式） */
+.dsh-tab-pagebar__lead{display:none}
+html[data-windows-titlebar] .dsh-tab-pagebar__lead{display:block;flex:none;align-self:center;width:1px;height:18px;margin-right:10px;
+  background:var(--dsw-alias-border-l2);-webkit-app-region:no-drag}
 html[data-windows-titlebar] .dsh-tab-pagebar__tab{height:calc(var(--dsh-windows-titlebar-height, 40px) - 8px)}
 html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:calc(var(--dsh-windows-titlebar-height, 40px) - 4px)}
 /* 标签放不下时：右缘渐隐，提示后面还有，「…」按钮列出被挤出去的标签 */
@@ -1134,6 +1148,7 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
               'data-window-drag': '',
             },
             h('style', { key: 'style' }, CSS),
+            h('span', { key: 'lead', className: 'dsh-tab-pagebar__lead', 'aria-hidden': true }),
             h(
               'div',
               {
@@ -1239,6 +1254,132 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
         )
       }
     }
+
+    // ── 设置（两个开关，默认开启；浏览器本地 localStorage 持久化） ─────────────────
+    const SETTINGS_KEY = 'dsh.tab.settings.v1'
+    const SETTINGS_DEFAULTS = Object.freeze({ autoMaximize: true, autoHideSidebar: true })
+    const SETTINGS_ROWS = [
+      { key: 'autoMaximize', title: 'settings.autoMaximize', hint: 'settings.autoMaximize.hint' },
+      { key: 'autoHideSidebar', title: 'settings.autoHideSidebar', hint: 'settings.autoHideSidebar.hint' },
+    ]
+    const SETTINGS_CSS = `
+.dsh-tab-settings{display:flex;flex-direction:column}
+.dsh-tab-settings__row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 0;min-height:44px}
+.dsh-tab-settings__text{min-width:0;display:flex;flex-direction:column;gap:2px}
+.dsh-tab-settings__title{color:var(--dsw-alias-label-primary);font-size:14px;line-height:20px}
+.dsh-tab-settings__hint{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:17px}
+.dsh-tab-switch{position:relative;flex:none;width:36px;height:20px;padding:0;border:0;border-radius:999px;cursor:pointer;
+  background:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 22%,transparent);transition:background-color .15s ease}
+.dsh-tab-switch[aria-checked=true]{background:var(--dsw-alias-state-business-primary,#356ae6)}
+.dsh-tab-switch__knob{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;
+  box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .15s ease}
+.dsh-tab-switch[aria-checked=true] .dsh-tab-switch__knob{transform:translateX(16px)}
+.dsh-tab-switch:focus-visible{outline:2px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
+@media (prefers-reduced-motion:reduce){.dsh-tab-switch,.dsh-tab-switch__knob{transition:none}}
+`
+
+    function readSettings() {
+      try {
+        const raw = localStorage.getItem(SETTINGS_KEY)
+        if (raw !== null) {
+          const value = JSON.parse(raw)
+          if (value !== null && typeof value === 'object') {
+            return {
+              autoMaximize: typeof value.autoMaximize === 'boolean' ? value.autoMaximize : SETTINGS_DEFAULTS.autoMaximize,
+              autoHideSidebar:
+                typeof value.autoHideSidebar === 'boolean' ? value.autoHideSidebar : SETTINGS_DEFAULTS.autoHideSidebar,
+            }
+          }
+        }
+      } catch (error) {
+        /* 存储不可用 / 内容损坏：用默认值 */
+      }
+      return { ...SETTINGS_DEFAULTS }
+    }
+
+    function createSettingsStore() {
+      let snapshot = Object.freeze(readSettings())
+      const listeners = new Set()
+      return {
+        subscribe(listener) {
+          listeners.add(listener)
+          return () => listeners.delete(listener)
+        },
+        getSnapshot() {
+          return snapshot
+        },
+        set(patch) {
+          snapshot = Object.freeze({ ...snapshot, ...patch })
+          try {
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(snapshot))
+          } catch (error) {
+            /* 无痕模式 / 存储禁用：本次运行内仍然生效 */
+          }
+          for (const listener of [...listeners]) listener()
+        },
+      }
+    }
+
+    /** 设置页上的一行：标题 + 说明 + 开关。 */
+    function SettingRow(props) {
+      const { settings, row, t } = props
+      const state = useSyncExternalStore(settings.subscribe, settings.getSnapshot)
+      const on = state[row.key] === true
+      return h(
+        'div',
+        { className: 'dsh-tab-settings__row' },
+        h(
+          'div',
+          { className: 'dsh-tab-settings__text' },
+          h('span', { className: 'dsh-tab-settings__title' }, t(row.title)),
+          h('span', { className: 'dsh-tab-settings__hint' }, t(row.hint)),
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            role: 'switch',
+            className: 'dsh-tab-switch',
+            'aria-checked': on,
+            'aria-label': t(row.title),
+            onClick: () => settings.set({ [row.key]: !on }),
+          },
+          h('span', { className: 'dsh-tab-switch__knob' }),
+        ),
+      )
+    }
+
+    const identityT = (key) => key
+
+    function createSettingsCard(settings) {
+      return function DshTabSettings(props) {
+        if (props !== undefined && props !== null && props.view === 'summary') return null
+        const t = typeof props?.t === 'function' ? props.t : identityT
+        return h(
+          'div',
+          { className: 'dsh-tab-settings' },
+          h('style', { key: 'style' }, SETTINGS_CSS),
+          SETTINGS_ROWS.map((row) => h(SettingRow, { key: row.key, settings, row, t })),
+        )
+      }
+    }
+
+    /** 「常规」设置里的单行入口（一个开关一行）。 */
+    function createGeneralRow(settings, row) {
+      return function DshTabGeneralRow(props) {
+        const t = typeof props?.t === 'function' ? props.t : identityT
+        return h(
+          'div',
+          { className: 'dsh-tab-settings' },
+          h('style', { key: 'style' }, SETTINGS_CSS),
+          h(SettingRow, { settings, row, t }),
+        )
+      }
+    }
+
+    // ── 启动时的一次性动作（每次启动应用一次，页面刷新 / 热重载不重复） ───────────
+    const STARTUP_FLAG = 'dsh.tab.startup.v1'
+    const MAXIMIZE_ENDPOINT = '/dsh-tab/api/maximize'
 
     // ── 插件入口 ────────────────────────────────────────────────────────────
     return {
@@ -1449,6 +1590,93 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
             TabBar,
           ),
         )
+
+        // 设置：插件页里的设置卡片 + 「常规」设置里各一行开关
+        const settings = createSettingsStore()
+        ctx.slots.inject('plugins.bundle.config', () =>
+          ctx.slots.register(
+            { name: 'plugins.bundle.config', id: 'dsh-tab-settings', key: 'dsh-tab', locale: NS },
+            createSettingsCard(settings),
+          ),
+        )
+        SETTINGS_ROWS.forEach((row, index) => {
+          ctx.slots.inject('settings.general.item', () =>
+            ctx.slots.register(
+              { name: 'settings.general.item', id: `dsh-tab-${row.key}`, order: 40 + index, locale: NS },
+              createGeneralRow(settings, row),
+            ),
+          )
+        })
+
+        // 启动动作：自动最大化（交给宿主半，只在 Windows 桌面端）+ 自动隐藏侧边栏
+        ctx.effect(() => {
+          const timers = new Set()
+          const later = (fn, delay) => {
+            const timer = setTimeout(() => {
+              timers.delete(timer)
+              try {
+                fn()
+              } catch (error) {
+                console.error('dsh-tab: startup step failed', error)
+              }
+            }, delay)
+            timers.add(timer)
+          }
+
+          const hideSidebarWhenReady = () => {
+            let attempts = 0
+            const findFrame = () => {
+              const overlay = document.querySelector('[data-shell-overlay]')
+              return overlay === null ? null : overlay.parentElement
+            }
+            const check = () => {
+              attempts += 1
+              const frame = findFrame()
+              if (frame === null) {
+                if (attempts < 40) later(check, 250)
+                return
+              }
+              // 官方帧在左栏收起时带 data-sidebar-collapsed；已经收起就什么都不做
+              if (frame.hasAttribute('data-sidebar-collapsed')) return
+              layout.toggleSidebar()
+            }
+            // 帧一出现就先等一小会儿，让持久化的侧栏状态先落位，再判断要不要收起
+            const waitForFrame = () => {
+              if (findFrame() === null) {
+                attempts += 1
+                if (attempts < 40) later(waitForFrame, 250)
+                return
+              }
+              later(check, 400)
+            }
+            waitForFrame()
+          }
+
+          const startup = () => {
+            try {
+              if (window.sessionStorage.getItem(STARTUP_FLAG) === '1') return
+              window.sessionStorage.setItem(STARTUP_FLAG, '1')
+            } catch (error) {
+              /* sessionStorage 不可用：每次加载都执行一遍 */
+            }
+            const current = settings.getSnapshot()
+            const desktop = document.documentElement.hasAttribute('data-windows-titlebar')
+            if (current.autoMaximize && desktop) {
+              fetch(MAXIMIZE_ENDPOINT, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: '{}',
+              }).catch((error) => console.warn('dsh-tab: maximize request failed', error))
+            }
+            if (current.autoHideSidebar) hideSidebarWhenReady()
+          }
+
+          later(startup, 1200)
+          return () => {
+            for (const timer of timers) clearTimeout(timer)
+            timers.clear()
+          }
+        }, 'dsh-tab: startup behaviour')
       },
     }
   },
