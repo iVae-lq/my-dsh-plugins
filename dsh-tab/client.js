@@ -222,7 +222,7 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
 .dsh-tab-pagebar__icon{position:relative;flex:none;width:16px;height:16px;display:grid;place-items:center;
   color:var(--dsw-alias-label-tertiary)}
 .dsh-tab-pagebar__tab[aria-selected=true] .dsh-tab-pagebar__icon{color:var(--dsw-alias-label-secondary)}
-.dsh-tab-pagebar__label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-tab-pagebar__label{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-tab-pagebar__dot{flex:none;width:6px;height:6px;border-radius:50%}
 .dsh-tab-pagebar__dot[data-signal=running]{background:var(--dsw-alias-state-business-primary);
   animation:dsh-tab-pulse 1.6s ease-in-out infinite}
@@ -522,6 +522,12 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
           'data-drop': drop === null || drop === undefined ? undefined : drop,
           title: pinned ? `${title} · ${t('tab.pinned')}` : title,
           onClick: () => onSelect(id),
+          // 双击关闭标签（固定标签不能直接关）
+          onDoubleClick: (event) => {
+            if (pinned) return
+            event.preventDefault()
+            onClose(id)
+          },
           onPointerDown: (event) => {
             if (event.button !== 0 || panel === true) return
             const target = event.target
