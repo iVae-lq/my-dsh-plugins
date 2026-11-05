@@ -1,0 +1,70 @@
+{
+  "name": "dsh-tab",
+  "version": "0.2.1",
+  "description": "Browser-style book tabs for DeepSeek Harness (DSH): one tab per conversation, workspace badges, drag reorder, pin / close / archive.",
+  "type": "module",
+  "license": "MIT",
+  "author": "imchangchang",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/imchangchang/dsh-tab.git"
+  },
+  "homepage": "https://github.com/imchangchang/dsh-tab#readme",
+  "bugs": {
+    "url": "https://github.com/imchangchang/dsh-tab/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "cordis",
+    "tabs",
+    "session-tabs",
+    "conversation-tabs",
+    "web-ui",
+    "dsh-desktop"
+  ],
+  "scripts": {
+    "check": "node --check client.js && node --check index.js",
+    "docs:mock": "node scripts/make-demo.mjs",
+    "prepublishOnly": "npm run check"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "external": [
+        "react"
+      ]
+    }
+  }
+}

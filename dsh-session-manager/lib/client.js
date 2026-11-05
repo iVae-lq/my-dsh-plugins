@@ -1,0 +1,7394 @@
+/**
+ * @dsh-session-manager — Client half.
+ *
+ * Renders the title-bar action cluster (Archive / Unarchive, Move to
+ * workspace, Delete session) and the sidebar-foot Session manager panel
+ * (Open / Archive / Unarchive / Move / Migrate preset / Delete per row,
+ * plus search, workspace/archive/annotation filters, sorting and toggle-close behaviour).
+ * Favorites, review-later flags, tags, notes and priority share a separate metadata store. No build
+ * step: DSH loads the file as a Cordis client bundle via its inject
+ * declaration in package.json.
+ */
+window.__ModuleLoader__.load({
+  id: "dsh-session-manager",
+  factory: (require) => {
+    var module = { exports: {} };
+    var exports = module.exports;
+    Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
+
+    const React = require("react");
+    const { useState, useEffect, useMemo, useRef, useSyncExternalStore } = React;
+    const P = require("@deepseek-ai/dsh-client-ui-primitives");
+    if (typeof window !== "undefined") {
+      window.__smReact = React;
+      let rdomModule = null;
+      try { rdomModule = require("react-dom"); } catch (_) {}
+      if (!rdomModule) {
+        try { rdomModule = require("react-dom/client"); } catch (_) {}
+      }
+      if (!rdomModule && typeof window.ReactDOM !== "undefined") {
+        rdomModule = window.ReactDOM;
+      }
+      window.__smReactDOM = (rdomModule && typeof rdomModule.createPortal === "function")
+        ? rdomModule
+        : (typeof React.createPortal === "function" ? React : null);
+      // Tiny imperative portal helper: takes a React element + a host
+      // DOM node, creates a React root on the host (lazily), and re-renders
+      // the element into it on each call. Used by ConfirmDialog to escape
+      // the sidebar overflow:hidden ancestor.
+      try {
+        const RDOM = require("react-dom/client");
+        if (RDOM && typeof RDOM.createRoot === "function") {
+          window.__smRenderInto = (tree, host) => {
+            if (!tree || !host) return;
+            try {
+              if (!host.__smRoot) host.__smRoot = RDOM.createRoot(host);
+              host.__smRoot.render(tree);
+            } catch (_) { /* ignore render failure */ }
+          };
+        }
+      } catch (_) { /* react-dom/client not available */ }
+    }
+// Monotonically-increasing z-index for popup dialogs so the most-recently
+// opened popup always sits on top of any previously opened popup. The
+// CSS-defined z-index values (confirm 10000 / migrate 10001 / annotation +
+// bulk 10002) are static; without a counter the user can open an
+// annotation popup (10002) after a confirm popup (10000) and the older
+// confirm stays below. Each dialog component claims a fresh slot from
+// this counter on mount, writes it to inline style.zIndex, and never
+// recycles within a session, so the most-recently opened popup is
+// always the topmost one.
+// These values are all resolved INSIDE the #dsh-session-manager-overlay-root
+// stacking context (see the layering contract in the stylesheet): the root
+// itself sits at 1050, below DSH's 1100 floating tier, so the absolute size of
+// the numbers here never competes with DSH's own tooltips and menus.
+let dialogZStackCounter = 100000;
+function nextDialogZ() { return ++dialogZStackCounter; }
+const activeDialogZStack = [];
+function registerDialogZ(z) {
+  if (typeof z === "number" && z > 0 && !activeDialogZStack.includes(z)) {
+    activeDialogZStack.push(z);
+  }
+}
+function unregisterDialogZ(z) {
+  if (typeof z === "number" && z > 0) {
+    const idx = activeDialogZStack.indexOf(z);
+    if (idx !== -1) activeDialogZStack.splice(idx, 1);
+  }
+}
+function isTopmostDialog(z) {
+  if (!activeDialogZStack.length) return true;
+  const maxZ = Math.max(...activeDialogZStack);
+  return typeof z === "number" && z >= maxZ;
+}
+
+    // Wrap an anchor in DSH's own Tooltip primitive (falls back to the bare
+    // node when the primitive is unavailable).
+    //
+    // `portal: true` renders the bubble under document.body, which escapes the
+    // plugin dialog's own overflow clipping -- but DSH's bubble paints at a
+    // hard-coded z-index 1100 and exposes no class hook, so it can only stay
+    // visible while every plugin surface stays BELOW 1100. Keep the panel
+    // (1020) and the overlay root (1050) inside that gap; see the layering
+    // contract in the stylesheet.
+    function renderTip(label, node, side = "bottom", portal = true) {
+      if (!label || !node) return node;
+      if (P && typeof P.Tooltip === "function") {
+        return h(P.Tooltip, { label, side, portal, align: "center" }, node);
+      }
+      return node;
+    }
+
+    const NS = "session-manager";
+    const API = "/session-manager/api";
+
+    const zh = {
+      "marks.filter.favorite": "收藏",
+      "marks.filter.favorite.aria": "收藏筛选",
+      "marks.filter.review": "待回看",
+      "marks.filter.review.aria": "待回看筛选",
+      "marks.filter.tags": "按标签筛选",
+      "marks.filter.priority": "按优先级筛选",
+      "marks.favorite.add": "收藏会话",
+      "marks.favorite.remove": "取消收藏",
+      "marks.review.add": "标记待回看",
+      "marks.review.remove": "取消待回看",
+      "marks.edit": "标签/备注",
+      "marks.header.edit": "标签/备注",
+      "marks.edit.aria": "编辑标签、备注和优先级",
+      "marks.title": "会话标记",
+      "marks.desc": "「{title}」：编辑标记与备注",
+      "marks.favorite": "收藏",
+      "marks.review": "待回看",
+      "marks.tags": "标签",
+      "marks.tags.placeholder": "用逗号分隔，最多 20 个标签，每个 32 字符（重复自动合并）。例如：排障，方案",
+      "marks.tags.help": "最多 20 个标签，每个 32 字符；重复标签会自动合并",
+      "marks.note": "备注",
+      "marks.note.placeholder": "例如：等待 Windows 环境验证；下次继续检查回滚逻辑（最多 2000 字符）",
+      "marks.privacy": "仅用于会话整理，不写入聊天记录，也不会自动发送给模型。",
+      "marks.priority": "优先级",
+      "marks.priority.all": "全部优先级",
+      "marks.priority.1": "1 · 最高",
+      "marks.priority.2": "2 · 高",
+      "marks.priority.3": "3 · 普通",
+      "marks.priority.4": "4 · 低",
+      "marks.priority.5": "5 · 最低",
+      "marks.priority.help": "1 最高，5 最低，默认 3（普通）",
+      "marks.tags.all": "全部标签",
+      "marks.tags.none": "无标签",
+      "marks.tags.missing": "{tag}（无匹配）",
+      "marks.save": "保存标记",
+      "marks.saving": "保存中…",
+      "marks.cancel": "取消",
+      "marks.loading": "正在加载会话标记…",
+      "marks.error": "会话标记加载失败：{message}",
+      "marks.retry": "重试标记加载",
+      "marks.conflict": "标记已在其他窗口更新。当前输入仍保留；请载入最新内容后再编辑。",
+      "marks.reload": "载入最新内容",
+      "marks.discard": "放弃当前未保存的标记修改？",
+      "marks.note.exists": "有备注",
+      "marks.sort": "优先级（1 → 5）",
+"marks.note.exists": "有备注",
+      "marks.import.copy": "复制 Prompt",
+      "marks.import.copy.copied": "已复制，请粘贴到当前对话生成结果",
+      "marks.import.copy.failed": "复制失败：{message}",
+      "marks.import.paste": "导入",
+      "marks.import.paste.label": "AI 返回结果",
+      "marks.import.paste.help": "把模型返回的 JSON 粘贴到下方输入框，再点击“导入”",
+      "marks.import.paste.aria": "AI 返回的 JSON",
+      "marks.import.paste.placeholder": "支持 json 代码块或纯 JSON，例如: { \"tags\": [\"标签1\", \"标签2\"], \"note\": \"会话备注\" }",
+      "marks.import.paste.clear": "清空输入框",
+      "marks.import.empty": "请先把 AI 返回的 JSON 粘贴到上方输入框",
+      "marks.import.unknown": "未知字段",
+      "marks.import.discard": "导入将覆盖当前未保存的修改，是否继续？",
+      "marks.import.failure": "导入失败：{message}",
+      "marks.import.warnings": "已导入，但有以下调整：",
+      "marks.import.success": "已从剪贴板导入 AI 结果",
+      "marks.tags.clear": "清空标签",
+      "marks.note.clear": "清空备注",
+      "header.aria": "会话操作",
+      "header.more": "更多操作",
+      "menu.open": "打开",
+      "menu.archive": "归档会话",
+      "menu.unarchive": "移出归档",
+      "menu.delete": "删除会话…",
+      "menu.move": "移动到工作区…",
+      "menu.manage": "打开会话管理…",
+      "footer.aria": "会话与工作区",
+      "footer.label": "会话与工作区",
+      "panel.title": "会话管理",
+      "panel.github.title": "欢迎Star和提交Issue",
+      "panel.update.title": "检查更新",
+      "panel.update.badge": "有新版本可用",
+      "update.title": "检查更新",
+      "update.done.title": "升级成功",
+      "update.newVersion": "发现新版本",
+      "update.currentVersion": "当前版本",
+      "update.runningVersion": "当前运行版本",
+      "update.installedVersion": "已安装版本",
+      "update.latestVersion": "最新版本",
+      "update.isLatest": "当前已是最新版本",
+      "update.checking": "正在检查更新…",
+      "update.installing": "正在通过插件管理器安装新版本…",
+      "update.btn.check": "检查更新",
+      "update.btn.update": "更新到 v{version}",
+      "update.btn.updating": "更新中…",
+      "update.btn.later": "稍后",
+      "update.btn.done": "好的",
+      "update.btn.close": "关闭",
+      "update.btn.retry": "重试",
+      "update.done.restart": "升级成功！已安装 v{to}（当前运行 v{from}）。请重启 DSH 使新版本生效。",
+      "update.done.refresh": "升级成功！已安装 v{to}。请刷新界面使新版本生效。",
+      "update.done.applied": "升级成功！新版本已立即生效。",
+      "update.rolledBack.title": "已安全回滚",
+      "update.rolledBack": "升级未成功，已安全回滚至旧版本 v{version}。",
+      "update.rolledBack.reason": "原因：{reason}",
+      "update.source.linked": "开发模式（本地链接），请手动修改或拉取代码。",
+      "update.source.github": "通过 Git/GitHub 安装，请通过 DSH 插件市场或 git 更新。",
+      "update.source.installation": "系统内置插件，无法独立更新。",
+      "update.source.unknown": "无法确认插件安装来源，为保证安全已禁止自动更新。",
+      "update.hmrUnsupported": "当前处于 HMR 开发环境，无法在运行中直接自我更新。请使用 DSH 插件市场或命令行执行更新。",
+      "update.error": "更新遇到问题",
+      "update.autoCheck": "自动检查更新",
+      "update.autoCheck.enable": "开启",
+      "settings.registry": "安装源",
+      "settings.registry.npm": "npm 官方源 (npmjs.org)",
+      "settings.registry.china": "国内镜像源 (npmmirror.com)",
+      "settings.registry.local": "本地测试源 (127.0.0.1:4873)",
+      "settings.title": "会话管理",
+      "settings.pluginName": "dsh-session-manager",
+      "settings.versionSection": "插件版本",
+      "settings.prefSection": "偏好设置",
+      "settings.dialogOpacity": "弹窗透明度",
+      "settings.dialogOpacity.hint": "仅调整插件弹窗的背景透明度",
+      "settings.dialogOpacity.value": "{value}%",
+      "settings.dialogOpacity.reset": "恢复默认",
+      "settings.projectSection": "项目",
+      "settings.github": "GitHub 仓库",
+      "settings.star": "感谢Star",
+      "settings.star.tip": "Star on GitHub",
+      "settings.feedback": "欢迎反馈",
+      "settings.feedback.tip": "GitHub Issues",
+      "panel.search": "搜索标题、ID、标签或备注",
+      "panel.workspace": "工作区",
+      "panel.workspace.all": "全部工作区",
+      "panel.workspace.ungrouped": "未分组",
+      "panel.workspace.loading": "正在加载工作区…",
+      "panel.workspace.error": "工作区加载失败：{message}",
+      "panel.workspace.retry": "重试",
+      "panel.sort": "排序",
+      "panel.sort.unavailable": "当前 DSH 未提供创建时间，暂按原顺序显示",
+      "panel.sort.updated-desc": "最近更新",
+      "panel.sort.updated-asc": "最早更新",
+      "panel.sort.created-desc": "最新创建",
+      "panel.sort.created-asc": "最早创建",
+      "panel.sort.name-asc": "名称升序",
+      "panel.sort.name-desc": "名称降序",
+      "panel.count": "显示 {shown} / {total} 个会话",
+      "panel.reset": "重置筛选",
+      "panel.empty.filtered": "没有匹配的会话，请调整搜索或筛选条件",
+      "panel.filter.all": "全部",
+      "panel.filter.active": "未归档",
+      "panel.filter.archived": "已归档",
+      "panel.empty": "暂无会话",
+      "panel.empty.archived": "归档为空",
+      "panel.archived": "已归档",
+      "panel.workspaceArchived": "工作区已归档",
+      "notice.workspaceReAdded": "工作区已恢复显示，但旧会话继续归档",
+      "error.workspaceArchived": "所属工作区已归档，无法取消归档该会话。请先在工作区管理中恢复工作区。",
+      "panel.running": "运行中",
+      "panel.current": "当前",
+      "panel.session.new": "新建会话",
+      "panel.close": "关闭",
+      "row.open": "打开",
+      "row.archive": "归档",
+      "row.unarchive": "移出归档",
+      "row.move": "移动至工作区",
+      "row.delete": "删除会话",
+      "row.migrate": "迁移预设",
+      "migrate.title": "迁移 Agent 预设",
+      "migrate.desc": "「{title}」：迁移至目标预设",
+      "migrate.current": "当前预设",
+      "migrate.target": "目标预设",
+      "migrate.noPresets": "没有可用的目标预设",
+      "migrate.same": "请选择与当前预设不同的目标预设",
+      "migrate.confirm": "确认迁移",
+      "migrate.completed": "Agent 预设已迁移为 {preset}",
+      "confirm.delete.title": "删除会话",
+      "confirm.delete.desc": "「{title}」：删除，不可恢复",
+      "confirm.delete.running": "该会话正在运行，删除将立即中断它。",
+      "confirm.delete.subagents": "将连带删除 {count} 个关联的子智能体会话。",
+      "confirm.delete.previewLoading": "正在检查关联的子智能体会话…",
+      "confirm.delete.previewError": "检查关联子智能体会话失败，无法确认删除安全，请稍后重试。",
+      "confirm.delete.confirm": "确认删除",
+      "confirm.move.title": "移动会话到工作区",
+      "confirm.move.desc": "「{title}」：移动至目标工作区",
+      "confirm.move.running": "该会话正在运行，移动会中断并关闭它；之后可在目标工作区重新打开继续。",
+      "confirm.move.empty": "没有可移动到的其他工作区。",
+      "confirm.move.select": "选择目标工作区",
+      "confirm.move.current": "当前工作区：{name}",
+      "confirm.move.same": "请选择与当前工作区不同的目标工作区",
+      "confirm.move.confirm": "确认移动",
+      "move.restartRequired": "会话已成功移动至目标工作区，但当前工作目录需要在重启 DSH 后生效。",
+      "confirm.cancel": "取消",
+      "busy.processing": "处理中…",
+      "error.operation": "操作失败：{message}",
+      "workspace.default": "默认工作区",
+      "workspace.sessions": "{count} 个会话",
+      "panel.tab.sessions": "会话管理",
+      "panel.tab.workspaces": "工作区管理",
+      "workspace.search": "搜索工作区名称或路径",
+      "workspace.filter.all": "全部",
+      "workspace.filter.active": "未归档",
+      "workspace.filter.archived": "已归档",
+      "workspace.sort.updated-desc": "最近更新",
+      "workspace.sort.updated-asc": "最早更新",
+      "workspace.sort.name-asc": "名称升序",
+      "workspace.sort.name-desc": "名称降序",
+      "workspace.bulk.archive": "归档",
+      "workspace.bulk.unarchive": "取消归档",
+      "workspace.count": "显示 {shown} / {total} 个工作区",
+      "workspace.reset": "重置筛选",
+      "workspace.empty.filtered": "没有匹配的工作区，请调整搜索或筛选条件",
+      "workspace.empty": "暂无工作区",
+      "workspace.badge.archived": "已归档",
+      "workspace.lastUpdated": "最近更新：{time}",
+      "workspace.switch.active": "已在原生侧边栏显示（点击归档隐藏）",
+      "workspace.switch.archived": "已在原生侧边栏隐藏（点击恢复显示）",
+      "workspace.switch.aria": "工作区显示开关：{name}",
+      "workspace.archive.confirm.title": "归档工作区",
+      "workspace.archive.confirm.desc": "确认归档工作区「{name}」？此操作将同时归档该工作区下的 {count} 个未归档会话并在原生侧边栏隐藏该工作区。",
+      "workspace.archive.failed": "归档工作区失败：{message}",
+      "workspace.unarchive.failed": "恢复工作区失败：{message}",
+      "bulk.title": "批量管理",
+      "bulk.selectedFiltered": "已选 {selected} / {filtered} 项",
+      "bulk.selectAllFiltered": "全选筛选",
+      "bulk.clear": "清空选择",
+      "bulk.archive": "归档",
+      "bulk.unarchive": "取消归档",
+      "bulk.delete": "删除会话",
+      "bulk.move": "移动至工作区",
+      "bulk.moveBtn": "移动至工作区",
+      "bulk.presetMigrate": "迁移预设",
+      "bulk.favorite": "收藏",
+      "bulk.unfavorite": "取消收藏",
+      "bulk.review": "待回看",
+      "bulk.unreview": "取消待回看",
+      "bulk.tagsAdd": "添加标签",
+      "bulk.tagsRemove": "清空标签",
+      "bulk.priority": "设置优先级",
+      "bulk.tags.placeholder": "用逗号分隔，例如：排障, 方案",
+      "bulk.priority.aria": "选择优先级",
+      "bulk.workspace.aria": "选择目标工作区",
+      "bulk.preset.aria": "选择目标 preset",
+      "bulk.dialog.title": "批量操作：{action}",
+      "bulk.dialog.summary": "「{count}条会话」：{action}",
+      "bulk.dialog.warning.delete": "删除操作不可撤销，请确认后再继续。",
+      "bulk.delete.actionText": "删除，不可恢复",
+      "bulk.move.actionText": "移动至目标工作区",
+      "bulk.presetMigrate.actionText": "迁移至目标预设",
+      "bulk.priority.actionText": "设置优先级",
+      "bulk.tagsAdd.actionText": "添加标签",
+      "bulk.tagsRemove.actionText": "移除全部标签",
+      "bulk.archive.actionText": "归档",
+      "bulk.unarchive.actionText": "取消归档",
+      "bulk.favorite.actionText": "添加星标",
+      "bulk.unfavorite.actionText": "取消星标",
+      "bulk.review.actionText": "设为待回看",
+      "bulk.unreview.actionText": "取消待回看",
+      "bulk.confirm.archive": "确认归档",
+      "bulk.confirm.unarchive": "确认还原",
+      "bulk.confirm.favorite": "确认收藏",
+      "bulk.confirm.unfavorite": "确认移除",
+      "bulk.confirm.review": "确认标记",
+      "bulk.confirm.unreview": "确认清除",
+      "bulk.confirm.tagsAdd": "确认添加",
+      "bulk.confirm.tagsRemove": "确认清空",
+      "bulk.confirm.priority": "确认设置",
+      "bulk.confirm.move": "确认移动",
+      "bulk.confirm.presetMigrate": "确认迁移",
+      "bulk.confirm.delete": "确认删除",
+      "bulk.dialog.execute": "执行",
+      "bulk.dialog.cancel": "取消",
+      "bulk.progress.title": "正在执行：{action}",
+      "bulk.progress.current": "处理 {done} / {total}",
+      "bulk.progress.cancel": "取消",
+      "bulk.progress.completed": "已完成 {done} / {total}",
+      "bulk.result.title": "批量操作完成：{action}",
+      "bulk.result.successGroup": "成功 ({count})",
+      "bulk.result.failedGroup": "失败 ({count})",
+      "bulk.result.skippedGroup": "跳过 ({count})",
+      "bulk.result.retry": "重试失败项",
+      "bulk.result.close": "关闭",
+      "bulk.error.tooMany": "批量操作最多支持 200 项，请缩小筛选范围后重试",
+      "bulk.checkbox.aria": "选择 {title}",
+      "bulk.heading": "批量操作",
+      "panel.selectMode": "批量处理",
+      "panel.selectMode.exit": "退出批量处理",
+      "panel.selectMode.aria": "进入批量管理模式",
+      "panel.selectMode.active.aria": "退出批量管理模式",
+    };
+    const en = {
+      "marks.filter.favorite": "Favorites",
+      "marks.filter.favorite.aria": "Favorites filter",
+      "marks.filter.review": "Review later",
+      "marks.filter.review.aria": "Review later filter",
+      "marks.filter.tags": "Filter by tag",
+      "marks.filter.priority": "Filter by priority",
+      "marks.favorite.add": "Favorite session",
+      "marks.favorite.remove": "Remove favorite",
+      "marks.review.add": "Mark for review",
+      "marks.review.remove": "Clear review flag",
+      "marks.edit": "Tags/Notes",
+      "marks.header.edit": "Tags/Notes",
+      "marks.edit.aria": "Edit tags, notes and priority",
+      "marks.title": "Session annotations",
+      "marks.desc": "\"{title}\": Edit tags and notes",
+      "marks.favorite": "Favorite",
+      "marks.review": "Review later",
+      "marks.tags": "Tags",
+      "marks.tags.placeholder": "Separate with commas. Up to 20 tags, 32 chars each (duplicates merged). e.g. bug, design",
+      "marks.tags.help": "Up to 20 tags, 32 characters each; duplicates are merged",
+      "marks.note": "Note",
+      "marks.note.placeholder": "For example: awaiting Windows verification; check rollback next (up to 2000 characters)",
+      "marks.privacy": "For organization only. Not written into chat history or automatically sent to the model.",
+      "marks.priority": "Priority",
+      "marks.priority.all": "All priorities",
+      "marks.priority.1": "1 · Highest",
+      "marks.priority.2": "2 · High",
+      "marks.priority.3": "3 · Normal",
+      "marks.priority.4": "4 · Low",
+      "marks.priority.5": "5 · Lowest",
+      "marks.priority.help": "1 is highest, 5 is lowest. Default is 3 (Normal).",
+      "marks.tags.all": "All tags",
+      "marks.tags.none": "No tags",
+      "marks.tags.missing": "{tag} (no matches)",
+      "marks.save": "Save annotations",
+      "marks.saving": "Saving…",
+      "marks.cancel": "Cancel",
+      "marks.loading": "Loading session annotations…",
+      "marks.error": "Could not load annotations: {message}",
+      "marks.retry": "Retry annotations",
+      "marks.conflict": "Another window changed these annotations. Your draft is preserved; load the latest version before editing again.",
+      "marks.reload": "Load latest",
+      "marks.discard": "Discard unsaved annotation changes?",
+      "marks.note.exists": "Has note",
+      "marks.sort": "Priority (1 → 5)",
+      "marks.import.copy": "Copy Prompt",
+      "marks.import.copy.copied": "Copied. Paste it into the current conversation to generate the result.",
+      "marks.import.copy.failed": "Copy failed: {message}",
+      "marks.import.paste": "Import",
+      "marks.import.paste.label": "AI response",
+      "marks.import.paste.help": "Paste the JSON returned by the model into the box below, then click Import.",
+      "marks.import.paste.aria": "JSON returned by the model",
+      "marks.import.paste.placeholder": "Supports json code fences or plain JSON, e.g. { \"tags\": [\"tag1\", \"tag2\"], \"note\": \"session note\" }",
+      "marks.import.paste.clear": "Clear input",
+      "marks.import.empty": "Paste the JSON returned by the model into the box above first.",
+      "marks.import.unknown": "unknown field",
+      "marks.import.discard": "Importing will overwrite your unsaved edits. Continue?",
+      "marks.import.failure": "Import failed: {message}",
+      "marks.import.warnings": "Imported, with adjustments:",
+      "marks.import.success": "Imported AI result from the clipboard",
+      "marks.tags.clear": "Clear tags",
+      "marks.note.clear": "Clear note",
+      "header.aria": "Session actions",
+      "header.more": "More actions",
+      "menu.open": "Open",
+      "menu.archive": "Archive session",
+      "menu.unarchive": "Unarchive session",
+      "menu.delete": "Delete session…",
+      "menu.move": "Move to workspace…",
+      "menu.manage": "Open session manager…",
+      "footer.aria": "Sessions & Workspaces",
+      "footer.label": "Sessions & Workspaces",
+      "panel.title": "Session manager",
+      "panel.github.title": "Star the project or open an issue",
+      "panel.update.title": "Check for updates",
+      "panel.update.badge": "New version available",
+      "update.title": "Check for Updates",
+      "update.done.title": "Upgrade Succeeded",
+      "update.newVersion": "New Version Available",
+      "update.currentVersion": "Current Version",
+      "update.runningVersion": "Running Version",
+      "update.installedVersion": "Installed Version",
+      "update.latestVersion": "Latest Version",
+      "update.isLatest": "Up to date",
+      "update.checking": "Checking for updates…",
+      "update.installing": "Installing update via plugin manager…",
+      "update.btn.check": "Check for Updates",
+      "update.btn.update": "Update to v{version}",
+      "update.btn.updating": "Updating…",
+      "update.btn.later": "Later",
+      "update.btn.done": "OK",
+      "update.btn.close": "Close",
+      "update.btn.retry": "Retry",
+      "update.done.restart": "Upgrade succeeded! Installed v{to} (running v{from}). Please restart DSH to apply.",
+      "update.done.refresh": "Upgrade succeeded! Installed v{to}. Please refresh the UI to apply.",
+      "update.done.applied": "Upgrade succeeded! Update applied and active now.",
+      "update.rolledBack.title": "Safely Rolled Back",
+      "update.rolledBack": "Upgrade was not completed. Safely rolled back to previous version v{version}.",
+      "update.rolledBack.reason": "Reason: {reason}",
+      "update.source.linked": "Development mode (linked package). Please update local code directly.",
+      "update.source.github": "Installed via Git/GitHub. Please update via DSH Market or git.",
+      "update.source.installation": "Built-in package. Cannot be updated independently.",
+      "update.source.unknown": "Unknown installation source. Self-update disabled for safety.",
+      "update.hmrUnsupported": "Running under HMR development mode; self-update cannot proceed while active. Please update via DSH Market or CLI.",
+      "update.error": "Update Error",
+      "update.autoCheck": "Automatically check for updates",
+      "update.autoCheck.enable": "Enable",
+      "settings.registry": "Install Source",
+      "settings.registry.npm": "Official npm (npmjs.org)",
+      "settings.registry.china": "China mirror (npmmirror.com)",
+      "settings.registry.local": "Local test registry (127.0.0.1:4873)",
+      "settings.title": "Session Manager",
+      "settings.pluginName": "dsh-session-manager",
+      "settings.versionSection": "Plugin Version",
+      "settings.prefSection": "Preferences",
+      "settings.dialogOpacity": "Dialog opacity",
+      "settings.dialogOpacity.hint": "Adjusts dialog background opacity only",
+      "settings.dialogOpacity.value": "{value}%",
+      "settings.dialogOpacity.reset": "Reset to default",
+      "settings.projectSection": "Project",
+      "settings.github": "GitHub Repository",
+      "settings.star": "Star on GitHub",
+      "settings.star.tip": "Star on GitHub",
+      "settings.feedback": "Feedback / Issues",
+      "settings.feedback.tip": "GitHub Issues",
+      "panel.search": "Search title, ID, tags or notes",
+      "panel.workspace": "Workspace",
+      "panel.workspace.all": "All workspaces",
+      "panel.workspace.ungrouped": "Ungrouped",
+      "panel.workspace.loading": "Loading workspaces…",
+      "panel.workspace.error": "Could not load workspaces: {message}",
+      "panel.workspace.retry": "Retry",
+      "panel.sort": "Sort by",
+      "panel.sort.unavailable": "Creation times are unavailable in this DSH version; showing source order.",
+      "panel.sort.updated-desc": "Recently updated",
+      "panel.sort.updated-asc": "Least recently updated",
+      "panel.sort.created-desc": "Newest created",
+      "panel.sort.created-asc": "Oldest created",
+      "panel.sort.name-asc": "Name (A-Z)",
+      "panel.sort.name-desc": "Name (Z-A)",
+      "panel.count": "Showing {shown} / {total} sessions",
+      "panel.reset": "Reset filters",
+      "panel.empty.filtered": "No matching sessions. Adjust your search or filters.",
+      "bulk.title": "Bulk management",
+      "bulk.selectedFiltered": "Selected {selected} / {filtered}",
+      "bulk.selectAllFiltered": "Select all in filter",
+      "bulk.clear": "Clear selection",
+      "bulk.archive": "Archive",
+      "bulk.unarchive": "Unarchive",
+      "bulk.delete": "Delete session",
+      "bulk.move": "Move to workspace",
+      "bulk.moveBtn": "Move",
+      "bulk.presetMigrate": "Migrate preset",
+      "bulk.favorite": "Favorite",
+      "bulk.unfavorite": "Unfavorite",
+      "bulk.review": "Mark for review",
+      "bulk.unreview": "Clear review flag",
+      "bulk.tagsAdd": "Add tags",
+      "bulk.tagsRemove": "Clear tags",
+      "bulk.priority": "Set priority",
+      "bulk.tags.placeholder": "Comma-separated, e.g. bug, design",
+      "bulk.priority.aria": "Choose priority",
+      "bulk.workspace.aria": "Choose target workspace",
+      "bulk.preset.aria": "Choose target preset",
+      "bulk.dialog.title": "Bulk action: {action}",
+      "bulk.dialog.summary": "Sessions ({count}): {action}",
+      "bulk.dialog.warning.delete": "Deletion is permanent and cannot be undone.",
+      "bulk.delete.actionText": "Delete, cannot be undone",
+      "bulk.move.actionText": "Move to target workspace",
+      "bulk.presetMigrate.actionText": "Migrate to target preset",
+      "bulk.priority.actionText": "Set priority",
+      "bulk.tagsAdd.actionText": "Add tags",
+      "bulk.tagsRemove.actionText": "Remove all tags",
+      "bulk.archive.actionText": "Archive",
+      "bulk.unarchive.actionText": "Unarchive",
+      "bulk.favorite.actionText": "Favorite",
+      "bulk.unfavorite.actionText": "Unfavorite",
+      "bulk.review.actionText": "Mark for review",
+      "bulk.unreview.actionText": "Unmark review",
+      "bulk.confirm.archive": "Archive",
+      "bulk.confirm.unarchive": "Unarchive",
+      "bulk.confirm.favorite": "Favorite",
+      "bulk.confirm.unfavorite": "Unfavorite",
+      "bulk.confirm.review": "Mark review",
+      "bulk.confirm.unreview": "Clear review",
+      "bulk.confirm.tagsAdd": "Add tags",
+      "bulk.confirm.tagsRemove": "Clear tags",
+      "bulk.confirm.priority": "Set priority",
+      "bulk.confirm.move": "Move",
+      "bulk.confirm.presetMigrate": "Migrate",
+      "bulk.confirm.delete": "Delete",
+      "bulk.dialog.execute": "Execute",
+      "bulk.dialog.cancel": "Cancel",
+      "bulk.progress.title": "Running: {action}",
+      "bulk.progress.current": "Processing {done} / {total}",
+      "bulk.progress.cancel": "Cancel",
+      "bulk.progress.completed": "Finished {done} / {total}",
+      "bulk.result.title": "Bulk action finished: {action}",
+      "bulk.result.successGroup": "Success ({count})",
+      "bulk.result.failedGroup": "Failed ({count})",
+      "bulk.result.skippedGroup": "Skipped ({count})",
+      "bulk.result.retry": "Retry failed",
+      "bulk.result.close": "Close",
+      "bulk.error.tooMany": "Batch actions support at most 200 sessions; please narrow the filter.",
+      "bulk.checkbox.aria": "Select {title}",
+      "bulk.heading": "Bulk actions",
+      "panel.selectMode": "Batch process",
+      "panel.selectMode.exit": "Exit batch process",
+      "panel.selectMode.aria": "Enter bulk selection mode",
+      "panel.selectMode.active.aria": "Exit bulk selection mode",
+      "panel.filter.all": "All",
+      "panel.filter.active": "Active",
+      "panel.filter.archived": "Archived",
+      "panel.empty": "No sessions",
+      "panel.empty.archived": "No archived sessions",
+      "panel.archived": "Archived",
+      "panel.workspaceArchived": "Workspace Archived",
+      "notice.workspaceReAdded": "Workspace restored to view, but previous sessions remain archived.",
+      "error.workspaceArchived": "The workspace for this session is archived. Please restore the workspace in Workspace Management first.",
+      "panel.running": "Running",
+      "panel.current": "Current",
+      "panel.session.new": "New session",
+      "panel.close": "Close",
+      "row.open": "Open",
+      "row.archive": "Archive",
+      "row.unarchive": "Unarchive",
+      "row.move": "Move to workspace",
+      "row.delete": "Delete session",
+      "row.migrate": "Migrate preset",
+      "migrate.title": "Migrate Agent preset",
+      "migrate.desc": "\"{title}\": Migrate to target preset",
+      "migrate.current": "Current preset",
+      "migrate.target": "Target preset",
+      "migrate.noPresets": "No target presets are available",
+      "migrate.same": "Choose a target preset different from the current preset",
+      "migrate.confirm": "Migrate",
+      "migrate.completed": "Agent preset migrated to {preset}",
+      "confirm.delete.title": "Delete session",
+      "confirm.delete.desc": "\"{title}\": Delete, cannot be undone",
+      "confirm.delete.running": "This session is running; deleting will interrupt it immediately.",
+      "confirm.delete.subagents": "Will also delete {count} associated subagent session(s).",
+      "confirm.delete.previewLoading": "Checking for associated subagent sessions...",
+      "confirm.delete.previewError": "Failed to check associated subagents. Cannot verify deletion safety. Please try again later.",
+      "confirm.delete.confirm": "Delete",
+      "confirm.move.title": "Move session to workspace",
+      "confirm.move.desc": "\"{title}\": Move to target workspace",
+      "confirm.move.running": "This session is running; moving will interrupt and close it; you can reopen it from the target workspace to continue.",
+      "confirm.move.empty": "No other workspaces to move to.",
+      "confirm.move.select": "Select target workspace",
+      "confirm.move.current": "Current workspace: {name}",
+      "confirm.move.same": "Choose a target workspace different from the current workspace",
+      "confirm.move.confirm": "Move",
+      "move.restartRequired": "Session moved to target workspace successfully, but working directory will take effect after restarting DSH.",
+      "confirm.cancel": "Cancel",
+      "busy.processing": "Working…",
+      "error.operation": "Operation failed: {message}",
+      "workspace.default": "Default workspace",
+      "workspace.sessions": "{count} sessions",
+      "panel.tab.sessions": "Sessions",
+      "panel.tab.workspaces": "Workspaces",
+      "workspace.search": "Search by name or path",
+      "workspace.filter.all": "All",
+      "workspace.filter.active": "Active",
+      "workspace.filter.archived": "Archived",
+      "workspace.sort.updated-desc": "Recently updated",
+      "workspace.sort.updated-asc": "Earliest updated",
+      "workspace.sort.name-asc": "Name (A-Z)",
+      "workspace.sort.name-desc": "Name (Z-A)",
+      "workspace.bulk.archive": "Archive",
+      "workspace.bulk.unarchive": "Unarchive",
+      "workspace.count": "Showing {shown} / {total} workspaces",
+      "workspace.reset": "Reset filters",
+      "workspace.empty.filtered": "No matching workspaces",
+      "workspace.empty": "No workspaces",
+      "workspace.badge.archived": "Archived",
+      "workspace.lastUpdated": "Updated: {time}",
+      "workspace.switch.active": "Shown in sidebar (click to archive)",
+      "workspace.switch.archived": "Hidden from sidebar (click to restore)",
+      "workspace.switch.aria": "Workspace visibility toggle: {name}",
+      "workspace.archive.confirm.title": "Archive Workspace",
+      "workspace.archive.confirm.desc": "Archive workspace \"{name}\"? This will also archive {count} active sessions in this workspace and hide it from the sidebar.",
+      "workspace.archive.failed": "Failed to archive workspace: {message}",
+      "workspace.unarchive.failed": "Failed to restore workspace: {message}"
+    };
+
+    const smTranslate = (k, vars) => {
+      const lang = (typeof window !== "undefined" && window.__smActiveLanguage) || "zh";
+      const dict = lang === "en" ? (en[k] || zh[k] || k) : (zh[k] || en[k] || k);
+      if (!vars || typeof dict !== "string") return dict;
+      return dict.replace(/\{(\w+)\}/g, (_, key) => vars[key] !== undefined ? vars[key] : "{" + key + "}");
+    };
+
+    const showNotice = (msg) => {
+      if (!msg) return;
+      try {
+        if (activeClientCtx?.notifications?.info && typeof activeClientCtx.notifications.info === "function") {
+          activeClientCtx.notifications.info(msg);
+          return;
+        }
+      } catch (_) {}
+      if (typeof window !== "undefined" && typeof window.alert === "function") {
+        window.alert(msg);
+      }
+    };
+
+    const css = [
+      ".sm-header{display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap}",
+      ".sm-header{flex-shrink:0}",
+      ".sm-headerBtn{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:28px;height:28px;box-sizing:border-box;color:var(--dsw-alias-label-secondary);background:transparent;border:0;border-radius:6px;cursor:pointer;padding:0 6px;font-size:12px;line-height:18px;white-space:nowrap;transition:background .12s,color .12s;flex-shrink:0}",
+      ".sm-header .sm-headerBtn{width:28px;min-width:28px;padding:0;justify-content:center;position:relative}",
+      ".sm-header .sm-headerBtnLabel{display:none}",
+      ".sm-header .sm-priorityBadge{position:absolute;top:0;right:0;font-size:8px;line-height:9px;padding:0 2px;border-radius:3px;pointer-events:none}",
+      ".sm-headerBtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
+      ".sm-headerBtn:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}",
+      ".sm-headerBtn:disabled{opacity:.5;cursor:not-allowed}",
+      ".sm-headerBtn.sm-headerBtnActive{background:var(--dsw-alias-button-ghost-active-fill,rgba(0,0,0,.06));color:var(--dsw-alias-label-primary)}",
+      ".sm-headerBtn svg{width:14px;height:14px;display:block;margin:auto;flex-shrink:0}",
+      ".sm-headerBtn:hover{background:var(--dsw-alias-interactive-bg-hover)}",
+      ".sm-busy{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:28px;margin-left:4px}",
+      ".sm-footer{display:flex}",
+      ".sm-footerBtn{min-height:28px;color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:6px;padding:3px 8px;font-size:12px;line-height:18px;display:inline-flex}",
+      ".sm-footerBtn:hover,.sm-footerBtn:focus-visible{color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-interactive-bg-hover)}",
+      ".sm-footerBtn svg{flex:none}",
+      ".sm-panel{display:flex;flex-direction:column;gap:10px;min-height:280px;max-height:min(70vh,640px);min-width:480px}",
+      ".sm-filter{display:flex;gap:4px;flex-wrap:wrap}",
+      ".sm-filterBtn{cursor:pointer;display:inline-flex;align-items:center;color:var(--dsw-alias-label-secondary);background:0 0;border:1px solid var(--dsw-alias-border-l2);border-radius:999px;height:28px;padding:3px 10px;font-size:12px;line-height:18px;white-space:nowrap;box-sizing:border-box;transition:all .15s ease}",
+      ".sm-filterBtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}",
+      ".sm-filterBtn:disabled{opacity:.4;cursor:not-allowed}",
+      ".sm-filterBtn.sm-on{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-module-platform);border-color:transparent}",
+      ".sm-list{display:flex;flex-direction:column;gap:4px;min-height:0;overflow:auto;flex:1;scrollbar-gutter:stable}",
+      ".sm-list::-webkit-scrollbar{width:6px;height:6px}",
+      ".sm-list::-webkit-scrollbar-track{background:transparent}",
+      ".sm-list::-webkit-scrollbar-thumb{background:var(--dsw-alias-scrollbar-bg-l1,rgba(128,128,128,.2));border-radius:999px}",
+      ".sm-list::-webkit-scrollbar-thumb:hover{background:var(--dsw-alias-scrollbar-hover-l1,rgba(128,128,128,.35))}",
+      ".sm-row{box-sizing:border-box;display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px}",
+      ".sm-row:hover{background:var(--dsw-alias-interactive-bg-hover)}",
+      ".sm-rowCurrent{border-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-label-secondary))}",
+      ".sm-rowMain{min-width:0;display:flex;flex-direction:column;gap:2px;flex:1 1 280px}",
+      ".sm-rowTitle{color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;display:flex;align-items:center;gap:6px;min-width:0}",
+      ".sm-rowTitle>span:first-child{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}",
+      ".sm-rowMeta{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}",
+      ".sm-rowActions{display:flex;gap:4px;flex:none;flex-wrap:wrap;justify-content:flex-end}",
+      ".sm-badge{flex:none;border-radius:999px;padding:0 6px;font-size:10px;line-height:16px}",
+      ".sm-badgeArchived{color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-markdown-tag)}",
+      ".sm-badgeWorkspaceArchived{color:var(--dsw-alias-state-warn-label,#dd8629);background:var(--dsw-alias-state-warn-tertiary,#fef5e7)}",
+      ".sm-badgeRunning{color:var(--dsw-alias-state-warn-label,#dd8629);background:var(--dsw-alias-state-warn-tertiary,#fef5e7)}",
+      ".sm-badgeCurrent{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-markdown-tag)}",
+      // The former .sm-danger / .sm-dangerText rules were removed: no element
+      // ever carried those classes (dead CSS) and they were the only colour
+      // !important declarations that could have fought a theme. Danger-coloured
+      // affordances use .sm-headerBtnDanger / .sm-rowBtnDanger /
+      // .sm-nativeDialogDanger / .sm-bulkBtnDanger, all plain DSH tokens.
+      ".sm-warn{display:flex;align-items:flex-start;gap:8px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-state-warn-tertiary,#fef5e7);border:1px solid color-mix(in srgb,var(--dsw-alias-state-warn-primary,#f59e0b) 30%,transparent);border-radius:8px;padding:8px 10px;margin-top:4px}",
+      ".sm-warn svg{flex:none;margin-top:1px}",
+      ".sm-error{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:18px;min-height:0;margin-top:4px}",
+      ".sm-foot{display:flex;justify-content:flex-end;align-items:center;gap:8px;width:100%}",
+      ".sm-footError{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:18px;margin-right:auto}",
+      ".sm-empty{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:20px;text-align:center;padding:24px 0}",
+      ".sm-moveSection{display:flex;flex-direction:column;gap:8px}",
+      ".sm-moveLabel{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}",
+      ".sm-moveList{display:flex;flex-direction:column;gap:4px;max-height:200px;overflow:auto}",
+      ".sm-moveItem{box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;cursor:pointer;transition:all .15s}",
+      ".sm-moveItem:hover{background:var(--dsw-alias-interactive-bg-hover)}",
+      ".sm-moveItemSelected{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-tertiary)}",
+      ".sm-moveItemName{color:var(--dsw-alias-label-primary);font-size:13px;line-height:18px}",
+      ".sm-moveItemMeta{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px}.sm-panelModal{width:760px;max-width:92vw}.sm-panelModal .sm-rowActions{flex-wrap:wrap;justify-content:flex-end}.sm-headerMenu{position:absolute;right:0;top:100%;margin-top:4px;z-index:100005;display:flex;flex-direction:column;min-width:140px;padding:4px;background:var(--dsw-alias-bg-layer-2,#fff);border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.15)}.sm-headerMenuItem{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:0 0;border:0;border-radius:6px;color:var(--dsw-alias-label-primary,#111);cursor:pointer;padding:6px 10px;font-size:13px;line-height:18px;white-space:nowrap}.sm-headerMenuItem:hover{background:var(--dsw-alias-interactive-bg-hover)}.sm-headerMenuItem:disabled{opacity:.5;cursor:not-allowed}.sm-headerMenuItem .sm-headerBtnIcon{width:14px;min-width:14px;text-align:center;flex-shrink:0}.sm-headerMenuItemDanger{color:var(--dsw-alias-state-error-primary,#d92d20)}.sm-headerMenuItemDanger:hover{background:var(--dsw-alias-interactive-bg-hover-danger)}.sm-headerMenuUltraOnly{display:none!important}.sm-migratePanel{display:flex;flex-direction:column;gap:14px;min-width:480px}.sm-migrateRow{display:flex;flex-direction:column;gap:8px}.sm-migrateRow>label{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:16px;font-weight:500}.sm-migrateChips{display:flex;flex-wrap:wrap;gap:6px}.sm-migrateChip{padding:6px 12px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2);background:transparent;cursor:pointer;font-size:13px;line-height:18px;color:var(--dsw-alias-label-primary);white-space:nowrap}.sm-migrateChip:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.sm-migrateChip:disabled{opacity:.5;cursor:not-allowed}.sm-migrateChipOn{background:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-label-primary-foreground,#fff);border-color:var(--dsw-alias-state-business-primary)}.sm-migrateEmpty{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}.sm-migratePreview{padding:10px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-size:13px;line-height:18px}.sm-migrateWarn{padding:10px 12px;border:1px solid color-mix(in srgb,var(--dsw-alias-state-warn-primary,#f59e0b) 30%,transparent);border-radius:8px;background:var(--dsw-alias-state-warn-tertiary,#fef5e7);color:var(--dsw-alias-label-secondary);font-size:13px;line-height:18px}.sm-migrateList{max-height:200px;overflow:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:8px}.sm-headerBtnDanger{background:transparent;color:var(--dsw-alias-state-error-primary,#d92d20);border:0;font-weight:500}.sm-headerBtnDanger:hover:not(:disabled){background:var(--dsw-alias-state-error-primary,#d92d20);color:var(--dsw-alias-label-primary-foreground,#fff);border-color:var(--dsw-alias-state-error-primary,#d92d20)}.sm-headerSecondaryActions{display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap}.sm-headerCompactMenu{display:none;position:relative}.sm-headerCompactMenu.sm-headerCompactMenuOpen{position:relative;z-index:100004}.sm-headerCompactMenuBtn{width:28px;min-width:28px;height:28px;padding:0;justify-content:center;font-size:14px;line-height:1}.sm-headerBtnIcon{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;font-size:14px;line-height:1;vertical-align:middle;flex-shrink:0}.sm-headerBtn.sm-markIcon{width:28px;min-width:28px;height:28px;padding:0;justify-content:center}.sm-headerBtn.sm-markIcon .sm-headerBtnIcon{width:14px;height:14px;font-size:14px;line-height:1}.sm-headerCompactMenuBtn .sm-headerBtnIcon{width:14px;height:14px;font-size:14px;line-height:1}.sm-annotationToggleOpen{position:relative;z-index:100004}@container (max-width:1000px){.sm-headerBtn{width:28px;min-width:28px;height:28px;padding:0;justify-content:center}.sm-headerBtnLabel,.sm-priorityText,.sm-priorityBadge{display:none}.sm-headerBtn.sm-headerBtn-withBadge{width:auto;min-width:28px;padding:0 6px}}@container (max-width:520px){.sm-headerSecondaryActions,.sm-headerSecondaryAction{display:none!important}.sm-headerCompactMenu{display:inline-flex}}@container (max-width:420px){.sm-header>:not(.sm-headerCompactMenu){display:none!important}.sm-header .sm-headerBtn:not(.sm-headerCompactMenuBtn){display:none!important}.sm-headerCompactMenu{display:inline-flex!important}.sm-headerMenu{right:auto!important;left:0!important}.sm-headerMenuUltraOnly{display:flex!important}}",
+      ".sm-panelDialog{position:fixed;inset:0;margin:auto;transform:none;width:680px;max-width:calc(100vw - 32px);height:560px;max-height:calc(100vh - 32px);box-sizing:border-box;display:flex;flex-direction:column;gap:0;background:var(--sm-dialog-fill);color:var(--dsw-alias-label-primary,#111);border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.25);overflow:hidden;z-index:1020}.sm-panelDialog .sm-nativeDialogHeader{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 16px;border-bottom:1px solid var(--dsw-alias-border-l2,#eee);flex:none;position:relative;min-height:46px;box-sizing:border-box}.sm-panelDialog .sm-nativeDialogTitle{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);margin:0;font-size:14px;line-height:20px;font-weight:600;min-width:0;max-width:calc(100% - 140px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;pointer-events:auto;z-index:0}.sm-panelDialog .sm-nativeDialogHeaderActions{display:flex;align-items:center;gap:6px;flex:none;position:relative;z-index:1;margin-left:auto}.sm-nativeDialogFooter,.sm-bulkDialog .sm-nativeDialogFooter,.sm-confirmDialog .sm-nativeDialogFooter,.sm-migrateDialog .sm-nativeDialogFooter{display:flex;padding:10px 16px;border-top:1px solid var(--dsw-alias-border-l2,#eee);flex:none;flex-wrap:wrap;justify-content:space-between;gap:6px;margin-top:0}.sm-panelDialog .sm-panel{display:flex;flex-direction:column;gap:6px;min-height:0;flex:1 1 auto;overflow:auto;padding:8px 12px}.sm-panelDialog .sm-list{display:flex;flex-direction:column;gap:2px;flex:1 1 auto;min-height:0;overflow:auto;scrollbar-gutter:stable}.sm-panelDialog .sm-row{display:flex;align-items:center;gap:8px;padding:6px 10px;min-height:36px;border:1px solid transparent;border-radius:8px;background:transparent;flex-shrink:0;transition:background .12s ease,border-color .12s ease}.sm-panelDialog .sm-row:hover{background:var(--dsw-alias-interactive-bg-hover)}.sm-panelDialog .sm-rowCurrent{background:var(--dsw-alias-bg-module-platform);border-color:var(--dsw-alias-state-business-primary,#356ae6)}.sm-panelDialog .sm-rowMain{display:flex;align-items:stretch!important;gap:8px;min-width:0;flex:1 1 auto;overflow:visible;text-align:left!important}.sm-panelDialog .sm-rowTitle{min-width:0;flex:1 1 0%;width:100%;align-self:stretch;display:flex;align-items:center;justify-content:flex-start;gap:6px;font-size:12px;line-height:16px;overflow:hidden;text-align:left!important;direction:ltr!important;unicode-bidi:plaintext}.sm-confirmDialog{z-index:10000}.sm-confirmDialog.sm-nativeDialogLayer{position:fixed;left:calc(50vw + 184px);top:calc(50vh - 90px);width:360px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);display:block;align-items:initial;justify-content:initial;box-sizing:border-box;background:transparent;border:0;box-shadow:none;padding:0;inset:calc(50vh - 90px) auto auto calc(50vw + 308px)}.sm-confirmDialog.sm-nativeDialogLayer .sm-nativeDialogBackdrop{display:none}.sm-confirmDialog.sm-nativeDialogLayer .sm-nativeDialog{position:relative;left:auto;top:auto;transform:none;width:auto;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);display:flex;flex-direction:column;box-sizing:border-box;background:var(--sm-dialog-fill);color:var(--dsw-alias-label-primary,#111);border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.25);padding:0;overflow:hidden;animation:sm-confirmPop .14s ease-out}.sm-confirmDialog .sm-nativeDialogHeader{position:relative;padding:12px 16px;border-bottom:1px solid var(--dsw-alias-border-l2,#eee);display:flex;align-items:center;justify-content:center;min-height:44px;box-sizing:border-box}.sm-confirmDialog .sm-nativeDialogTitle{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);margin:0;font-size:14px;line-height:20px;font-weight:600;text-align:center;width:auto;max-width:calc(100% - 32px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sm-confirmDialog .sm-nativeDialogBody{padding:10px 16px;display:flex;flex-direction:column;gap:8px;min-height:0;max-height:calc(100vh - 120px);overflow-y:auto}.sm-confirmDialog .sm-nativeDialogDescription{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);white-space:pre-wrap}.sm-confirmDialog .sm-warn{display:flex;align-items:flex-start;gap:8px;color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:18px;background:color-mix(in srgb,var(--dsw-alias-state-error-primary,#ec1313) 8%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-error-primary,#ec1313) 25%,transparent);border-radius:8px;padding:8px 10px;margin-top:0}.sm-confirmDialog .sm-nativeDialogFooter{padding:10px 16px;border-top:1px solid var(--dsw-alias-border-l2,#eee);flex-wrap:wrap;justify-content:space-between;gap:6px;margin-top:0}.sm-confirmDialog .sm-nativeDialogButton{min-height:28px;padding:3px 14px;font-size:12px;line-height:20px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;cursor:pointer;background:transparent;color:var(--dsw-alias-label-primary);text-align:center}.sm-confirmDialog .sm-nativeDialogCancel:hover:not(:disabled),.sm-migrateDialog .sm-nativeDialogCancel:hover:not(:disabled),.sm-updateDialog .sm-nativeDialogCancel:hover:not(:disabled),.sm-bulkDialog .sm-nativeDialogCancel:hover:not(:disabled),.sm-panelDialog .sm-nativeDialogCancel:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.sm-confirmDialog .sm-nativeDialogConfirm{background:var(--dsw-alias-state-business-primary,#356ae6);color:var(--dsw-alias-label-primary-foreground,#fff);border-color:var(--dsw-alias-state-business-primary,#356ae6)}.sm-confirmDialog .sm-nativeDialogConfirm:hover:not(:disabled){filter:brightness(.94)}@keyframes sm-confirmPop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}.sm-confirmDialog.sm-nativeDialog{padding:0;width:auto;max-width:none}.sm-panelDialog .sm-rowTitle>span:first-child{display:block;min-width:0;text-overflow:ellipsis;white-space:nowrap;overflow:hidden;flex:1 1 auto;width:auto;text-align:left!important;direction:ltr!important;unicode-bidi:plaintext}.sm-panelDialog .sm-rowMeta{display:none}.sm-panelDialog .sm-rowActions{display:flex;gap:4px;flex:none;align-items:center;justify-content:flex-end}.sm-panelDialog .sm-rowActions .sm-rowBtn{display:inline-flex;align-items:center;justify-content:center;min-height:22px;height:22px;box-sizing:border-box;padding:0 7px;font-size:11px;line-height:18px;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;white-space:nowrap;transition:background .12s,color .12s}.sm-panelDialog .sm-rowActions .sm-rowBtn.sm-rowBtnIcon,.sm-panelDialog .sm-rowActions .sm-rowBtn.sm-markIcon{width:22px;min-width:22px;padding:0;justify-content:center}.sm-panelDialog .sm-rowActions .sm-rowBtn.sm-markIcon .sm-headerBtnIcon,.sm-panelDialog .sm-rowActions .sm-rowBtn.sm-rowBtnIcon .sm-headerBtnIcon{width:14px;height:14px;font-size:14px;line-height:1}.sm-panelDialog .sm-rowActions .sm-rowBtn.sm-rowBtnIcon svg,.sm-panelDialog .sm-rowActions .sm-rowBtn.sm-markIcon svg{width:14px;height:14px;display:block;margin:auto;flex-shrink:0}.sm-rowActions .sm-rowBtnLabel{display:none}.sm-rowBtn.sm-markIcon{padding:0 6px;font-size:13px;line-height:18px}.sm-panelDialog .sm-rowActions .sm-rowBtn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.sm-panelDialog .sm-rowActions .sm-rowBtnActive{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.sm-panelDialog .sm-rowActions .sm-rowBtnDanger{color:var(--dsw-alias-state-error-primary)}.sm-panelDialog .sm-rowActions .sm-rowBtnDanger:hover{background:var(--dsw-alias-interactive-bg-hover-danger);color:var(--dsw-alias-state-error-primary)}.sm-panelDialog .sm-filter{flex:none;padding:6px 12px 4px;gap:4px;display:flex;flex-wrap:wrap}.sm-panelDialog .sm-filterBtn{height:28px;min-height:28px;padding:3px 10px;font-size:12px;line-height:18px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;box-sizing:border-box;white-space:nowrap;flex-shrink:0;transition:all .15s ease}.sm-panelDialog .sm-filterBtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.sm-panelDialog .sm-filterBtn:disabled{opacity:.4;cursor:not-allowed}.sm-panelDialog .sm-filterBtn.sm-on{background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-primary)}.sm-panelDialog .sm-badge{font-size:10px;line-height:14px;padding:0 5px;border-radius:6px;flex:none}.sm-panelDialog .sm-error{padding:6px 10px;margin:0;font-size:12px;line-height:16px}.sm-panelDialog .sm-nativeDialogButton{min-height:28px;padding:3px 14px;font-size:12px;line-height:20px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer;text-align:center}.sm-panelDialog .sm-nativeDialogCancel{background:transparent}.sm-panelDialog .sm-nativeDialogConfirm,.sm-annotationDialog .sm-nativeDialogConfirm{background:var(--dsw-alias-state-business-primary,#356ae6);color:var(--dsw-alias-label-primary-foreground,#fff);border-color:var(--dsw-alias-state-business-primary,#356ae6)}.sm-panelDialog .sm-nativeDialogConfirm:hover:not(:disabled),.sm-annotationDialog .sm-nativeDialogConfirm:hover:not(:disabled){filter:brightness(.94)}.sm-nativeDialogDanger{background:var(--dsw-alias-state-error-primary,#d92d20);color:var(--dsw-alias-label-primary-foreground,#fff);border-color:var(--dsw-alias-state-error-primary,#d92d20)}.sm-nativeDialogDanger:hover:not(:disabled){filter:brightness(.92)}.sm-confirmDialog .sm-nativeDialogDanger,.sm-migrateDialog .sm-nativeDialogDanger,.sm-bulkDialog .sm-nativeDialogDanger{background:var(--dsw-alias-state-error-primary,#d92d20);color:var(--dsw-alias-label-primary-foreground,#fff);border-color:var(--dsw-alias-state-error-primary,#d92d20)}.sm-confirmDialog .sm-nativeDialogDanger:hover:not(:disabled),.sm-migrateDialog .sm-nativeDialogDanger:hover:not(:disabled),.sm-bulkDialog .sm-nativeDialogDanger:hover:not(:disabled){filter:brightness(.92)}.sm-panelDialog .sm-empty{padding:18px 0;font-size:12px;color:var(--dsw-alias-label-tertiary);text-align:center}.sm-panelDialog .sm-footError{font-size:11px;color:var(--dsw-alias-state-error-primary);margin-right:auto;line-height:20px}.sm-panelDialog .sm-moveLabel{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}.sm-migrateDialog .sm-nativeDialogFooter{flex-wrap:wrap;justify-content:space-between;gap:6px;margin-top:0}.sm-migrateDialog .sm-migrateChip{cursor:pointer;pointer-events:auto;position:relative;z-index:1}.sm-migrateDialog .sm-migrateChip[disabled]{opacity:.5;cursor:not-allowed}.sm-migrateDialog.sm-nativeDialogLayer{position:fixed;left:50vw;top:auto;bottom:48px;transform:translateX(-50%);width:min(560px,calc(100vw - 32px));max-height:none;display:block;align-items:initial;justify-content:initial;box-sizing:border-box;background:transparent;border:0;box-shadow:none;padding:0;inset:auto;z-index:10001}.sm-migrateDialog.sm-nativeDialogLayer .sm-nativeDialogBackdrop{display:none}.sm-migrateDialog.sm-nativeDialogLayer .sm-nativeDialog{position:relative;left:auto;top:auto;transform:none;width:360px;max-width:calc(100vw - 32px);max-height:min(70vh,520px);box-sizing:border-box;background-color:var(--sm-dialog-fill);color:var(--dsw-alias-label-primary,#111);border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.45);overflow:hidden;padding:0;display:flex;flex-direction:column;gap:0}.sm-migrateDialog{position:fixed;left:50vw;top:auto;bottom:48px;transform:translateX(-50%);width:min(560px,calc(100vw - 32px));max-height:min(70vh,520px);box-sizing:border-box;display:flex;flex-direction:column;gap:0;background-color:var(--sm-dialog-fill);color:var(--dsw-alias-label-primary,#111);border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.45);overflow:hidden;z-index:10001}.sm-migrateDialog .sm-nativeDialogHeader{padding:12px 18px;border-bottom:1px solid var(--dsw-alias-border-l2,#eee);flex:none;position:relative;display:flex;align-items:center;justify-content:center;min-height:44px;box-sizing:border-box}.sm-migrateDialog .sm-nativeDialogTitle{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);margin:0;font-size:14px;line-height:20px;font-weight:600;color:var(--dsw-alias-label-primary,#111);text-align:center;width:auto;max-width:calc(100% - 36px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sm-migrateDialog .sm-migratePanel{padding:12px 18px;display:flex;flex-direction:column;gap:14px}.sm-migrateDialog .sm-nativeDialogBody{padding:0}.sm-migrateDialog .sm-nativeDialogFooter{padding:10px 16px;border-top:1px solid var(--dsw-alias-border-l2,#eee);flex:none;flex-wrap:wrap;justify-content:space-between;gap:6px;margin-top:0;gap:8px}.sm-migrateDialog .sm-migrateRow>label{color:var(--dsw-alias-label-secondary,#444)}.sm-migrateDialog .sm-migrateChip{padding:6px 12px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2,#ddd);background-color:var(--dsw-alias-markdown-tag,#f1f3f5);color:var(--dsw-alias-label-primary,#111);font-size:13px;line-height:18px;cursor:pointer;pointer-events:auto;position:relative;z-index:1;white-space:nowrap}.sm-migrateDialog .sm-migrateChip:hover:not(:disabled){background-color:var(--dsw-alias-interactive-bg-hover,#e8e8e8)}.sm-migrateDialog .sm-migrateChipOn{background-color:var(--dsw-alias-state-business-primary,#356ae6);color:var(--dsw-alias-label-primary-foreground,#fff);border-color:var(--dsw-alias-state-business-primary,#356ae6)}.sm-migrateDialog .sm-migrateChip.sm-migrateChipOn:hover:not(:disabled){background-color:var(--dsw-alias-button-info-hover,#4576f0);color:var(--dsw-alias-label-primary-foreground,#fff);border-color:var(--dsw-alias-button-info-hover,#4576f0);filter:none}.sm-migrateDialog .sm-migrateChipOn:hover:not(:disabled){filter:brightness(.92)}.sm-migrateDialog .sm-migrateChip[disabled]{opacity:.5;cursor:not-allowed}.sm-migrateDialog .sm-migrateEmpty{color:var(--dsw-alias-label-tertiary,#888)}.sm-migrateDialog .sm-migratePreview{padding:10px 12px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:8px;background-color:var(--dsw-alias-bg-layer-2,#fff);color:var(--dsw-alias-label-primary,#111);font-size:13px;line-height:18px}.sm-migrateDialog .sm-migrateWarn{padding:10px 12px;border:1px solid color-mix(in srgb,var(--dsw-alias-state-warn-primary,#f59e0b) 30%,transparent);border-radius:8px;background-color:var(--dsw-alias-state-warn-tertiary,#fef5e7);color:var(--dsw-alias-label-secondary,#444);font-size:13px;line-height:18px}.sm-migrateDialog .sm-nativeDialogButton{min-height:28px;padding:3px 14px;font-size:12px;line-height:20px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:8px;cursor:pointer;background-color:transparent;color:var(--dsw-alias-label-primary,#111);text-align:center}.sm-migrateDialog .sm-nativeDialogButton:hover:not(:disabled){background-color:var(--dsw-alias-interactive-bg-hover,#e8e8e8)}.sm-migrateDialog .sm-nativeDialogConfirm{background-color:var(--dsw-alias-state-business-primary,#356ae6);color:var(--dsw-alias-label-primary-foreground,#fff);border-color:var(--dsw-alias-state-business-primary,#356ae6)}.sm-migrateDialog .sm-nativeDialogConfirm:hover:not(:disabled){filter:brightness(.94)}",
+      // The .sm-tooltip rule below deliberately keeps !important: it targets
+      // DSH's Tooltip primitive (used through renderTip), which ships its own
+      // inline styles, so a plugin rule cannot win on specificity alone
+      // (Issue #21 regression guard). It overrides DSH's primitive rather than
+      // DSH's theme tokens -- and it only sets a token-based border plus
+      // z-index/shadow -- so it does not block theming.
+      // NOTE: DSH's bubble uses a hard-coded hashed class and forwards no
+      // className, so this rule matches nothing today (the class is never
+      // applied). Tooltip visibility is governed by the layering contract
+      // above, not by this rule; it is kept as the scoped replacement for the
+      // unscoped selector Issue #21 removed.
+      ".sm-panelHeaderClose{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;min-height:26px;padding:0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:7px;background:transparent;color:var(--dsw-alias-label-secondary,#555);cursor:pointer;flex:none;box-sizing:border-box;outline:none}.sm-panelHeaderClose:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,#eee);color:var(--dsw-alias-label-primary,#111)}.sm-panelHeaderClose svg{display:block;width:14px;height:14px;margin:auto}.sm-panelHeaderGithub{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;color:var(--dsw-alias-label-secondary,#555);text-decoration:none;flex:none;transition:background .15s,color .15s;cursor:pointer}.sm-panelHeaderGithub:hover{background:var(--dsw-alias-interactive-bg-hover,#eee);color:var(--dsw-alias-label-primary,#111)}.sm-panelHeaderGithub svg{display:block;width:16px;height:16px;fill:currentColor}.sm-panelHeaderLeft{display:flex;align-items:center;gap:4px;flex:none;position:relative;z-index:1}.sm-panelHeaderWhale{display:inline-flex;align-items:center;justify-content:center;position:relative;width:26px;height:26px;border-radius:6px;color:var(--dsw-alias-label-secondary,#555);text-decoration:none;flex:none;transition:background .15s,color .15s;cursor:pointer}.sm-panelHeaderWhale:hover{background:var(--dsw-alias-interactive-bg-hover,#eee);color:var(--dsw-alias-label-primary,#111)}.sm-panelHeaderWhale svg{display:block;width:16px;height:16px;margin:auto}.sm-panelHeaderWhale .sm-updateDot{position:absolute;top:2px;right:2px;width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-state-error-primary,#e53e3e);border:1.5px solid var(--dsw-alias-bg-layer-1,#fff)}.sm-panelHeaderWhale .sm-updateSpinner{position:absolute;inset:2px;border:2px solid transparent;border-top-color:var(--dsw-alias-state-business-primary,#356ae6);border-radius:50%;animation:sm-spin .8s linear infinite}@keyframes sm-spin{to{transform:rotate(360deg)}}.sm-updateDialogLayer{display:flex!important;align-items:center!important;justify-content:center!important;position:fixed;inset:0;padding:16px;box-sizing:border-box;background:transparent;border:0;box-shadow:none;z-index:10010;pointer-events:none}.sm-updateDialogLayer .sm-nativeDialog{position:relative;width:380px;max-width:calc(100vw - 32px);height:248px!important;min-height:248px!important;max-height:248px!important;box-sizing:border-box;background:var(--sm-dialog-fill);color:var(--dsw-alias-label-primary,#111);border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.25);overflow:hidden;animation:none!important;pointer-events:auto}.sm-updateDialog .sm-nativeDialogHeader{position:relative;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px;border-bottom:1px solid var(--dsw-alias-border-l2,#eee);flex:none;height:46px;min-height:46px;max-height:46px;box-sizing:border-box}.sm-updateDialog .sm-nativeDialogTitle{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);margin:0;font-size:15px;line-height:20px;font-weight:600;text-align:center;width:auto;max-width:calc(100% - 80px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;z-index:0}.sm-updateDialog .sm-nativeDialogHeader .sm-panelHeaderClose{position:relative;z-index:1;margin-left:auto}.sm-updateDialog .sm-nativeDialogBody{padding:14px 16px;display:flex;flex-direction:column;gap:10px;height:152px!important;min-height:152px!important;max-height:152px!important;box-sizing:border-box;font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary,#111);overflow:hidden}.sm-updateDialog .sm-nativeDialogFooter{display:flex;padding:10px 16px;border-top:1px solid var(--dsw-alias-border-l2,#eee);flex:none;height:50px;min-height:50px;max-height:50px;box-sizing:border-box;flex-wrap:nowrap;justify-content:space-between;align-items:center;gap:8px;margin-top:0}.sm-updateDialog .sm-nativeDialogFooter .sm-nativeDialogConfirm:only-child{margin-left:auto}.sm-updateDialog .sm-nativeDialogButton{min-height:28px;padding:3px 14px;font-size:12px;line-height:20px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:8px;cursor:pointer;background:transparent;color:var(--dsw-alias-label-primary,#111);text-align:center;white-space:nowrap}.sm-nativeDialogButton:disabled{opacity:.5!important;cursor:not-allowed!important}.sm-updateDialog .sm-nativeDialogButton:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.sm-updateDialog .sm-nativeDialogConfirm,.sm-updateDialog .sm-nativeDialogButton.sm-nativeDialogConfirm,.sm-settingsCard .sm-nativeDialogConfirm,.sm-settingsCard .sm-nativeDialogButton.sm-nativeDialogConfirm{background:var(--dsw-alias-state-business-primary,#356ae6)!important;color:var(--dsw-alias-label-primary-foreground,#fff)!important;border-color:var(--dsw-alias-state-business-primary,#356ae6)!important}.sm-updateDialog .sm-nativeDialogCancel,.sm-updateDialog .sm-nativeDialogButton.sm-nativeDialogCancel{background:transparent!important;color:var(--dsw-alias-label-primary,#111)!important;border-color:var(--dsw-alias-border-l2,#ddd)!important}.sm-updateDialog .sm-nativeDialogConfirm:hover:not(:disabled),.sm-updateDialog .sm-nativeDialogButton.sm-nativeDialogConfirm:hover:not(:disabled),.sm-settingsCard .sm-nativeDialogConfirm:hover:not(:disabled),.sm-settingsCard .sm-nativeDialogButton.sm-nativeDialogConfirm:hover:not(:disabled){background:var(--dsw-alias-state-business-primary,#356ae6)!important;color:var(--dsw-alias-label-primary-foreground,#fff)!important;border-color:var(--dsw-alias-state-business-primary,#356ae6)!important;filter:brightness(.94)!important}.sm-updateDialog .sm-nativeDialogCancel:hover:not(:disabled),.sm-updateDialog .sm-nativeDialogButton.sm-nativeDialogCancel:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)!important;color:var(--dsw-alias-label-primary,#111)!important}.sm-updateVersionGrid{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;padding:12px;background:var(--dsw-alias-bg-layer-2,#fff);border:1px solid var(--dsw-alias-border-l2,#eee);border-radius:8px;font-size:13px;line-height:20px;box-sizing:border-box;flex:none}.sm-updateVersionLabel{color:var(--dsw-alias-label-secondary,#666);font-weight:500}.sm-updateVersionValue{color:var(--dsw-alias-label-primary,#111);font-family:monospace;font-size:13px}.sm-updateStatusBox{margin-top:10px;box-sizing:border-box;min-height:38px;height:38px;padding:8px 10px;border-radius:6px;border:1px solid transparent;font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary,#111);display:flex;align-items:center;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sm-updateDialog .sm-updateStatusBox{margin-top:0}.sm-updateStatusBox.sm-checking{color:var(--dsw-alias-label-secondary,#666);background:var(--dsw-alias-bg-layer-2,#f5f5f5);border:1px solid var(--dsw-alias-border-l2,#eee)}.sm-updateStatusBox.sm-warn{color:var(--dsw-alias-state-warn-label,#dd8629);background:var(--dsw-alias-state-warn-tertiary,#fef5e7);padding:8px 10px;border-radius:6px;border:1px solid color-mix(in srgb,var(--dsw-alias-state-warn-primary,#f59e0b) 25%,transparent)}.sm-updateStatusBox.sm-error{color:var(--dsw-alias-state-error-primary,#ec1313);background:color-mix(in srgb,var(--dsw-alias-state-error-primary,#ec1313) 8%,transparent);padding:8px 10px;border-radius:6px;border:1px solid color-mix(in srgb,var(--dsw-alias-state-error-primary,#ec1313) 22%,transparent)}.sm-updateStatusBox.sm-success{color:var(--dsw-alias-state-success-primary,#22c55e);background:var(--dsw-alias-state-success-tertiary,#e6faed);padding:8px 10px;border-radius:6px;border:1px solid color-mix(in srgb,var(--dsw-alias-state-success-primary,#22c55e) 25%,transparent)}.sm-settingsCard{background:var(--sm-dialog-surface);border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;padding:16px 20px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary,#111);box-sizing:border-box;width:100%}.sm-settingsHeader{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--dsw-alias-border-l2,#eee)}.sm-settingsTitle{margin:0;font-size:16px;line-height:22px;font-weight:600;display:flex;align-items:center;gap:8px}.sm-settingsTag{font-size:12px;padding:2px 8px;border-radius:999px;background:var(--dsw-alias-markdown-tag,#f1f3f5);color:var(--dsw-alias-label-secondary,#666);font-family:monospace}.sm-settingsSection{margin-top:14px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2,#eee)}.sm-settingsSectionTitle{font-size:13px;font-weight:600;color:var(--dsw-alias-label-secondary,#666);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px}.sm-settingsRow{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:36px;margin-top:8px}.sm-settingsRow:first-of-type{margin-top:0}.sm-settingsRow>span:first-child{white-space:nowrap;flex-shrink:0}.sm-settingsActions{display:flex;align-items:center;gap:8px;margin-top:10px}.sm-settingsLink{color:var(--dsw-alias-state-business-primary,#356ae6);text-decoration:none}.sm-settingsLink:hover{text-decoration:underline}.sm-settingsCheckbox{display:inline-flex;align-items:center;gap:6px;cursor:pointer}.sm-settingsSelect{min-height:30px;height:30px;width:280px;min-width:280px;max-width:280px;flex:0 0 280px;box-sizing:border-box;font-size:12px;line-height:20px;padding:4px 26px 4px 10px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,#fff);color:var(--dsw-alias-label-primary,#111);cursor:pointer}.sm-settingsRowLeft{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px;min-width:0;flex:1 1 auto}.sm-settingsRowLeft>span:first-child{white-space:nowrap;flex-shrink:0}.sm-panelHeaderClose:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,#eee);color:var(--dsw-alias-label-primary,#111)}.sm-panelHeaderClose:disabled{opacity:.5;cursor:not-allowed}.sm-migrateCurrent{padding:8px 10px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:8px;background:var(--dsw-alias-bg-layer-2,#fff);font-size:13px;line-height:18px;color:var(--dsw-alias-label-primary,#111)}.sm-migrateConfirmLayer.sm-confirmDialog.sm-nativeDialogLayer{width:360px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);inset:calc(50vh - 90px) auto auto calc(50vw + 308px)}.sm-migrateConfirmLayer.sm-confirmDialog.sm-nativeDialogLayer .sm-migrateDialog{position:relative;left:auto;top:auto;bottom:auto;transform:none;width:100%;max-width:calc(100vw - 32px);max-height:min(70vh,calc(100vh - 32px));z-index:auto;display:flex;flex-direction:column;overflow:hidden}.sm-migrateConfirmLayer .sm-migratePanel{min-width:0;max-height:calc(100vh - 120px);overflow-y:auto}.sm-migrateConfirmLayer .sm-nativeDialogButton.sm-nativeDialogConfirm:hover:not(:disabled){background-color:var(--dsw-alias-state-business-primary,#356ae6);color:var(--dsw-alias-label-primary-foreground,#fff);border-color:var(--dsw-alias-state-business-primary,#356ae6);filter:brightness(.94)}.sm-settingsSectionHeader{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}.sm-settingsSectionHeader .sm-settingsSectionTitle{margin-bottom:0}.sm-settingsVersionActions{display:flex;align-items:center;gap:8px}.sm-settingsCheckBtn{min-height:26px;padding:2px 12px;font-size:12px;line-height:18px;border-radius:6px;border:1px solid var(--dsw-alias-border-l2,#ddd);background:transparent;color:var(--dsw-alias-label-primary,#111);cursor:pointer;white-space:nowrap}.sm-settingsCheckBtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.sm-settingsRowInline{justify-content:flex-start;flex-wrap:wrap;gap:8px;align-items:center}.sm-settingsProjectLeft{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:nowrap}.sm-settingsProjectLabel{color:var(--dsw-alias-label-primary,#111);white-space:nowrap;flex-shrink:0}.sm-settingsBadgeActions{display:flex;align-items:center;gap:8px;margin-left:auto;flex:0 0 280px;width:280px;min-width:280px;max-width:280px;box-sizing:border-box;justify-content:flex-end}.sm-settingsBadgeActions>*{display:inline-flex;flex:1 1 0;min-width:0}.sm-settingsBadgeLink{display:inline-flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:4px 10px;min-height:28px;height:28px;box-sizing:border-box;border-radius:6px;border:1px solid var(--dsw-alias-border-l2,#ddd);background:var(--dsw-alias-markdown-tag,#f1f3f5);color:var(--dsw-alias-label-secondary,#555);font-size:12px;line-height:18px;text-decoration:none;cursor:pointer;white-space:nowrap;transition:all .15s}.sm-settingsBadgeLink:hover{background:var(--dsw-alias-interactive-bg-hover,#eee);color:var(--dsw-alias-state-business-primary,#356ae6);border-color:var(--dsw-alias-state-business-primary,#356ae6)}.sm-settingsBadgeLink svg{flex:none}.sm-tooltip{z-index:1100!important;box-shadow:none!important;border:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.15))!important;filter:none!important}",
+
+      // Issue #23 — dialog opacity.
+      //
+      // The fill is the DSH surface token itself, with the user's opacity used
+      // only as that token's weight inside color-mix(). At the default 100%
+      // the mix is `color-mix(in srgb, <token> 100%, transparent)`, which
+      // reproduces the token VERBATIM -- including whatever alpha the token (or
+      // a theme that republished it) already carries. The plugin therefore
+      // never forces an originally translucent DSH surface opaque, and only
+      // adds translucency when the user lowers the slider.
+      //
+      // Only the dialog *fill* is affected, so text, buttons, icons, borders
+      // and hover states stay fully opaque, and inside controls read their own
+      // DSH tokens rather than inheriting this setting. The static --sm-dialog-
+      // surface-fallback below is used only when the DSH token is missing; the
+      // plugin detects and names no theme plugin at all.
+      ":root{--sm-dialog-opacity:100%}",
+      "html[data-sm-theme=light]{--sm-dialog-surface-fallback:#fff}",
+      "html[data-sm-theme=dark]{--sm-dialog-surface-fallback:#1f1f23}",
+      // Native UA chrome (a <select> dropdown list, scrollbars, checkbox
+      // internals) is painted by the browser, not by DSH tokens. DSH owns the
+      // palette for it: ui-layout's ThemePresenter subscribes to the official
+      // `theme/change` event and writes `documentElement.style.colorScheme`
+      // ("html { color-scheme } for native UA chrome"), which every plugin
+      // surface inherits. The plugin must NOT override it -- an earlier revision
+      // forced `color-scheme` from this plugin's own theme mirror and could then
+      // pin the native chrome to the opposite scheme (dark dropdown lists in
+      // light mode) while the tokens had already moved on. DSH stays the single
+      // authority; the plugin only themes the list *items*, which is something
+      // color-scheme alone does not cover.
+      // The items use the *layer-3* surface, not the control's layer-2: a
+      // floating list must stay opaque, and a theme may give layer-2 an alpha,
+      // which composites over the UA's default popup backdrop and still reads as
+      // white. layer-3 is opaque in DSH's palette (#fff light / #353638 dark)
+      // and sits above the dialog (layer-1) and the control (layer-2). The
+      // checked row is marked with the accent text colour instead of a fill so
+      // no translucent token can wash it out either.
+      ".sm-panelDialog option,.sm-nativeDialog option,.sm-settingsCard option,.sm-headerMenu option{background-color:var(--dsw-alias-bg-layer-3,#fff);color:var(--dsw-alias-label-primary,#111)}",
+      ".sm-panelDialog option:checked,.sm-nativeDialog option:checked,.sm-settingsCard option:checked,.sm-headerMenu option:checked{background-color:var(--dsw-alias-bg-layer-3,#fff);color:var(--dsw-alias-state-business-primary,#356ae6)}",
+      ".sm-panelDialog option:disabled,.sm-nativeDialog option:disabled,.sm-settingsCard option:disabled,.sm-headerMenu option:disabled{color:var(--dsw-alias-label-tertiary,#888)}",
+      ".sm-nativeDialog,.sm-panelDialog,.sm-migrateDialog,.sm-settingsCard{--sm-dialog-surface:var(--dsw-alias-bg-layer-1,var(--sm-dialog-surface-fallback,#fff));--sm-dialog-fill:color-mix(in srgb,var(--sm-dialog-surface) var(--sm-dialog-opacity,100%),transparent)}",
+      ".sm-settingsSlider{display:flex;align-items:center;gap:8px;flex:0 0 280px;width:280px;min-width:280px;max-width:280px;box-sizing:border-box;justify-content:flex-end}",
+      ".sm-settingsRange{flex:1 1 auto;min-width:70px;margin:0;cursor:pointer;accent-color:var(--dsw-alias-state-business-primary,#356ae6)}",
+      ".sm-settingsRange:disabled{cursor:not-allowed}",
+      ".sm-settingsRangeValue{min-width:38px;text-align:right;font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary,#666);flex-shrink:0}",
+      ".sm-settingsResetBtn{min-height:28px;height:28px;padding:2px 10px;font-size:12px;line-height:18px;border-radius:6px;border:1px solid var(--dsw-alias-border-l2,#ddd);background:transparent;color:var(--dsw-alias-label-secondary,#666);cursor:pointer;white-space:nowrap;flex:0 0 auto;box-sizing:border-box}",
+      ".sm-settingsResetBtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary,#111)}",
+      ".sm-settingsResetBtn:disabled{opacity:.5;cursor:not-allowed}",
+      ".sm-settingsHint{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,#888)}.sm-settingsHintInline{margin-left:0;font-weight:normal}",
+
+      // DSH's own theme is the single source of colour. Every rule above reads
+      // --dsw-alias-* tokens directly and none of them is redefined here: the
+      // plugin only *reads* DSH's theme, so a theme (or a third-party theme
+      // plugin) that republishes those tokens is picked up automatically.
+      // The only thing these two rules still provide is the token-less
+      // fallback surface colour required by the dialog-opacity fill. The
+      // light/dark state itself is mirrored onto <html data-sm-theme> by
+      // smApplyTheme(), which reads body[data-ds-dark-theme].
+      "[data-sm-theme=light] .sm-nativeDialog,[data-sm-theme=light] .sm-panelDialog,[data-sm-theme=light] .sm-migrateDialog,[data-sm-theme=light] .sm-settingsCard{--sm-dialog-surface-fallback:#fff}",
+      "[data-sm-theme=dark] .sm-nativeDialog,[data-sm-theme=dark] .sm-panelDialog,[data-sm-theme=dark] .sm-migrateDialog,[data-sm-theme=dark] .sm-settingsCard{--sm-dialog-surface-fallback:#1f1f23}",
+      ".sm-panelDialog{max-height:min(640px,calc(100vh - 32px))}.sm-panelDialog .sm-panel{min-width:0;overflow:hidden}",
+      ".sm-panelTools{display:flex;flex-direction:column;gap:8px;flex:none;padding:2px 0 6px}",
+      ".sm-queryInput,.sm-viewSelect{box-sizing:border-box;width:100%;min-width:0;height:32px;padding:5px 9px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:8px;background:var(--dsw-alias-bg-layer-2,#fff);color:var(--dsw-alias-label-primary,#111);font:inherit;font-size:12px;line-height:20px;transition:border-color .15s ease,box-shadow .15s ease}",
+      ".sm-viewSelect,.sm-settingsSelect,.sm-wsSortSelect,.sm-prioritySelectInline,.sm-panelDialog select,.sm-nativeDialog select,.sm-settingsCard select{box-sizing:border-box!important;appearance:none;-webkit-appearance:none;-moz-appearance:none;border:1px solid var(--dsw-alias-border-l2,#ddd)!important;border-radius:8px!important;background-color:var(--dsw-alias-bg-layer-2,#fff)!important;color:var(--dsw-alias-label-primary,#111)!important;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23888888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")!important;background-repeat:no-repeat!important;background-position:right 8px center!important;background-size:10px 10px!important;padding-right:26px!important;cursor:pointer!important;outline:none!important;font:inherit;transition:border-color .15s ease,box-shadow .15s ease!important}",
+      ".sm-viewSelect:hover:not(:disabled),.sm-settingsSelect:hover:not(:disabled),.sm-wsSortSelect:hover:not(:disabled),.sm-prioritySelectInline:hover:not(:disabled),.sm-panelDialog select:hover:not(:disabled),.sm-nativeDialog select:hover:not(:disabled),.sm-settingsCard select:hover:not(:disabled){border-color:var(--dsw-alias-border-l1,#aaa)!important}",
+      ".sm-queryInput::placeholder{color:var(--dsw-alias-label-tertiary,#888)}.sm-queryInput:focus-visible,.sm-viewSelect:focus-visible,.sm-settingsSelect:focus-visible,.sm-wsSortSelect:focus-visible,.sm-prioritySelectInline:focus-visible,.sm-panelDialog select:focus-visible,.sm-nativeDialog select:focus-visible,.sm-settingsCard select:focus-visible,.sm-resetFilters:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#356ae6)!important;outline-offset:1px!important}.sm-viewSelect:disabled,.sm-settingsSelect:disabled,.sm-wsSortSelect:disabled,.sm-prioritySelectInline:disabled,.sm-panelDialog select:disabled,.sm-nativeDialog select:disabled,.sm-settingsCard select:disabled{opacity:.5!important;cursor:not-allowed!important}",
+      ".sm-selectExpanded{border-color:var(--dsw-alias-state-business-primary,#356ae6)!important;box-shadow:0 0 0 1px var(--dsw-alias-state-business-primary,#356ae6)!important;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23356ae6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 15-6-6-6 6'/%3E%3C/svg%3E\")!important}",
+      ".sm-customSelectMenu{position:fixed;z-index:100030;box-sizing:border-box;min-width:120px;max-height:260px;overflow-y:auto;overflow-x:hidden;padding:4px;background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-layer-2,#fff));border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:8px;box-shadow:none!important;font-family:inherit;font-size:12px;line-height:18px;color:var(--dsw-alias-label-primary,#111);user-select:none;scrollbar-width:thin;scrollbar-color:var(--dsw-alias-scrollbar-bg-l1,var(--dsw-alias-border-l1,rgba(128,128,128,.3))) transparent}.sm-customSelectMenu-dropUp{box-shadow:none!important}.sm-customSelectOption{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;border-radius:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-primary,#111);cursor:pointer;white-space:nowrap;user-select:none;transition:background-color .1s ease,color .1s ease}.sm-customSelectOption:hover:not(.sm-customSelectOptionDisabled){background-color:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}.sm-customSelectOptionSelected{background-color:var(--dsw-alias-interactive-bg-active,rgba(53,106,230,.08));color:var(--dsw-alias-state-business-primary,#356ae6);font-weight:500}.sm-customSelectOptionDisabled{opacity:.45;cursor:not-allowed;color:var(--dsw-alias-label-tertiary,#888)!important}.sm-customSelectOptionLabel{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto}.sm-customSelectOptionCheck{font-size:11px;font-weight:bold;color:var(--dsw-alias-state-business-primary,#356ae6);margin-left:6px;flex-shrink:0}",
+      ".sm-wsSortSelect,.sm-prioritySelectInline,.sm-panelSelects .sm-viewSelect{pointer-events:none!important}",
+      ".sm-wsSortField,.sm-annotationPriority,.sm-viewField,.sm-moveSection,.sm-settingsRow{cursor:pointer}",
+      ".sm-panelSelects{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.sm-panelSelects .sm-viewField>span{display:none}.sm-panelSelects .sm-viewField .sm-viewSelect{font-size:11px;padding:4px 24px 4px 8px;height:28px;line-height:18px;background-position:right 6px center}.sm-viewField{display:flex;flex-direction:column;gap:3px;min-width:0;color:var(--dsw-alias-label-secondary,#666);font-size:11px;line-height:16px}.sm-wsSortField{display:inline-flex;margin:0;vertical-align:middle}.sm-wsSortSelect{height:28px;font-size:11px;padding:3px 24px 3px 8px;width:auto;min-width:120px;border-radius:8px;line-height:18px;background-position:right 6px center;cursor:pointer}",
+      ".sm-filterBar{display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap}.sm-resultSummary{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;height:20px;min-height:20px;max-height:20px;line-height:20px;font-size:11px;color:var(--dsw-alias-label-tertiary,#888);box-sizing:border-box}.sm-resetFilters{padding:0 4px;height:20px;line-height:20px;border:0;background:none;color:var(--dsw-alias-state-business-primary,#356ae6);font:inherit;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;white-space:nowrap;border-radius:4px;box-sizing:border-box}.sm-resetFilters:hover{text-decoration:underline}.sm-workspaceNotice{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--dsw-alias-label-secondary,#666)}",
+      "@media(max-width:540px){.sm-panelSelects{grid-template-columns:minmax(0,1fr)}.sm-panelDialog .sm-row{height:auto;min-height:36px;flex-shrink:0;flex-wrap:wrap;padding:6px 8px}.sm-panelDialog .sm-rowMain{flex-basis:100%}.sm-panelDialog .sm-rowActions{width:100%;min-width:0;flex:1 1 100%;justify-content:flex-start}}",
+      ".sm-panelDialog:not(.sm-annotationSurface){position:fixed;inset:0;margin:auto;transform:none;width:680px;height:560px;max-height:calc(100vh - 32px)}.sm-panelDialog .sm-row{flex-shrink:0;padding:5px 8px}.sm-panelDialog .sm-rowMain{flex:1 1 200px;flex-direction:column;gap:4px}.sm-panelDialog .sm-rowActions{max-width:100%}.sm-rowSecondary{display:flex;flex-wrap:nowrap;align-items:center;gap:6px;min-width:0;line-height:18px}.sm-rowBadges{display:flex;align-items:center;gap:5px;min-width:0;flex:1 1 auto;flex-wrap:wrap;font-size:11px;line-height:18px}.sm-rowMeta{color:var(--dsw-alias-label-tertiary,#888);font-size:11px;line-height:18px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;flex:none}.sm-rowAnnotations{display:flex;align-items:center;gap:5px;min-width:0;font-size:10px;line-height:16px}",
+      // .sm-markIcon.sm-markOn keeps !important because the generic
+      // `.sm-panelDialog .sm-rowActions .sm-rowBtn` colour rule (3 classes)
+      // outranks this 2-class selector; it overrides the plugin's own rule,
+      // not DSH's theme. The .sm-priority-1/2 colours below are plugin
+      // semantics (priority levels have no DSH token); they and their dark
+      // branch are the only intentional data-driven theme branch left.
+      ".sm-markIcon{min-width:25px;padding-left:5px;padding-right:5px;font-size:15px}.sm-markIcon.sm-markOn{color:var(--dsw-alias-state-business-primary,#356ae6)!important;background:var(--dsw-alias-bg-module-platform,#f5f6f7)}.sm-priorityBadge{padding:0 5px;border-radius:4px;background:var(--dsw-alias-markdown-tag,#f1f3f5);color:var(--dsw-alias-label-secondary,#666)}.sm-priority-1{color:#c2410c;background:rgba(234,88,12,.12)}.sm-priority-2{color:#a16207;background:rgba(202,138,4,.12)}",
+      "[data-sm-theme=dark] .sm-priority-1{color:#fdba74}[data-sm-theme=dark] .sm-priority-2{color:#fde68a}",
+      ".sm-tagChip,.sm-noteBadge{max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:0;border-radius:4px;background:var(--dsw-alias-markdown-tag,#f1f3f5);color:var(--dsw-alias-label-secondary,#666);font:inherit;line-height:16px;padding:0 5px;cursor:pointer}.sm-noteBadge{background:transparent}.sm-tagChip:hover,.sm-noteBadge:hover{color:var(--dsw-alias-state-business-primary,#356ae6)}",
+      ".sm-markFilters{display:flex;flex-wrap:wrap;align-items:center;gap:8px}.sm-markFiltersGroup{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.sm-markFiltersSpacer{flex:1 1 auto;min-width:12px}.sm-markFilterToggle{height:28px;padding:3px 10px;white-space:nowrap}.sm-markFilterToggle:disabled{opacity:.5;cursor:not-allowed}.sm-bulkSelectBtn{height:28px;padding:3px 10px;white-space:nowrap}.sm-bulkSelectBtn:disabled{opacity:.5;cursor:not-allowed}",
+      // Layering contract (do not raise these above 1100).
+      // DSH's own scale is: 1000 = modal backdrop / full-viewport overlay,
+      // 1100 = floating tier shared by menus, popovers, dialogs AND the
+      // Tooltip bubble this plugin renders through renderTip(). DSH's Tooltip
+      // bubble has a hard-coded z-index (100 inline, 1100 when portaled) and
+      // exposes no class hook, so a plugin surface stacked above 1100 always
+      // hides its own tooltips.
+      // The plugin therefore keeps its two document-level layers inside the
+      // 1000..1100 gap -- the panel at 1020 and this overlay root at 1050 --
+      // and everything portaled into this root is relative to its context.
+      "#dsh-session-manager-overlay-root{position:fixed!important;inset:0!important;width:100%!important;height:100%!important;z-index:1050!important;pointer-events:none!important;overflow:visible!important}.sm-annotationDialog.sm-nativeDialogLayer{position:fixed;display:block;pointer-events:none;z-index:100002;background:transparent}.sm-annotationDialog .sm-nativeDialogBackdrop{display:none}.sm-annotationDialog.sm-annotationDialog-anchored.sm-nativeDialogLayer,.sm-confirmDialog.sm-confirmDialog-anchored.sm-nativeDialogLayer,.sm-bulkDialog.sm-bulkDialog-anchored.sm-nativeDialogLayer{inset:auto;background:transparent}.sm-annotationDialog.sm-confirmDialog.sm-nativeDialogLayer:not(.sm-annotationDialog-anchored){inset:50% auto auto calc(50vw + 308px);transform:translateY(-50%);max-height:calc(100vh - 32px)}.sm-panelDialog.sm-annotationSurface{position:absolute;width:360px;max-height:min(680px,calc(100vh - 32px));pointer-events:auto;z-index:100003;box-shadow:0 16px 48px rgba(0,0,0,.25)}.sm-panelDialog.sm-annotationSurface.sm-annotationSurface-anchored{position:relative;transform:none;left:auto;top:auto;margin:0}.sm-annotationCloseHint{margin:0 16px 8px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary)}",
+      ".sm-annotationBody{padding:14px 16px;display:flex;flex-direction:column;gap:12px;min-height:0;overflow:auto;flex:1 1 auto}.sm-annotationTarget{font-size:12px;line-height:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-secondary,#666)}.sm-annotationChecks{display:grid;grid-template-columns:auto 1fr;column-gap:14px;row-gap:4px;align-items:center;font-size:13px}.sm-annotationChecks>label{display:flex;gap:6px;align-items:center;cursor:pointer}.sm-annotationChecks .sm-annotationPriority{display:inline-flex;align-items:center;gap:6px;font-size:13px;line-height:18px;color:inherit}.sm-annotationChecks .sm-prioritySelectInline{height:26px;padding:2px 24px 2px 8px;font-size:12px;line-height:18px;min-width:104px;width:auto;border-radius:8px!important;background-position:right 6px center!important;color:var(--dsw-alias-label-primary,#111)}.sm-annotationChecks>small{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,#888);justify-self:start}.sm-annotationHint,.sm-annotationBody small{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,#888)}",
+      ".sm-noteInput{box-sizing:border-box;width:100%;min-height:60px;resize:vertical;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:7px;padding:8px;background:var(--dsw-alias-bg-layer-2,#fff);color:var(--dsw-alias-label-primary,#111);font:inherit;font-size:13px;line-height:19px}.sm-noteInput:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#356ae6);outline-offset:2px}.sm-markConflict{display:flex;flex-direction:column;gap:5px;font-size:12px;padding:8px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:6px}.sm-fieldWithClear .sm-fieldRow{position:relative;display:flex;align-items:flex-start;gap:4px}.sm-fieldRow .sm-queryInput{flex:1 1 auto;min-width:0}.sm-fieldRowNote{align-items:stretch}.sm-fieldClear{position:absolute;top:5px;right:6px;width:22px;height:22px;border:0;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;border-radius:4px;font-size:14px;line-height:18px;display:inline-flex;align-items:center;justify-content:center;padding:0}.sm-fieldClear:hover,.sm-fieldClear:focus-visible{color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-interactive-bg-hover);outline:none}.sm-fieldClearNote{top:6px}.sm-importGroup{display:flex;flex-direction:column;gap:8px;padding:12px 16px;border-top:1px solid var(--dsw-alias-border-l2,#eee)}.sm-importGroupHeader{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:20px}.sm-importLabel{color:var(--dsw-alias-label-secondary,#666);font-size:11px;line-height:16px}.sm-importGroupButtons{display:flex;align-items:center;gap:6px;flex:none}.sm-importBtn{cursor:pointer;color:var(--dsw-alias-label-primary,#111);background:transparent;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:8px;min-height:28px;padding:3px 14px;font-size:12px;line-height:20px;text-align:center}.sm-importBtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.sm-importBtn:disabled{opacity:.5;cursor:not-allowed}.sm-importStatus{margin:0;padding:8px 10px;font-size:12px;line-height:18px;background:var(--dsw-alias-state-business-tertiary,rgba(53,106,230,.08));color:var(--dsw-alias-label-secondary);border-radius:6px;white-space:pre-wrap;word-break:break-word}",
+      ".sm-bulkBar{box-sizing:border-box;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));align-items:stretch;gap:6px;padding:8px 10px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:10px;background:var(--dsw-alias-bg-layer-2,#fff)}.sm-bulkBar .sm-bulkSummary{grid-column:1/-1;color:var(--dsw-alias-label-primary,#111);font-size:12px;line-height:18px;font-weight:500;margin:0 0 2px}",
+      ".sm-bulkSummary{color:var(--dsw-alias-label-primary,#111);font-size:12px;line-height:18px;font-weight:500}",
+      "",
+      ".sm-panelDialog button,.sm-panelDialog a,.sm-panelHeaderGithub,.sm-panelHeaderWhale,.sm-panelHeaderClose,.sm-headerBtn,.sm-headerMenuItem,.sm-updateDialog button,.sm-settingsCard button,.sm-settingsCard a,.sm-rowBtn,.sm-bulkBtn{outline:none;box-shadow:none;-webkit-appearance:none;-moz-appearance:none;appearance:none}.sm-panelDialog button:hover,.sm-panelDialog a:hover,.sm-panelHeaderGithub:hover,.sm-panelHeaderWhale:hover,.sm-panelHeaderClose:hover,.sm-headerBtn:hover,.sm-headerMenuItem:hover,.sm-updateDialog button:hover,.sm-settingsCard button:hover,.sm-rowBtn:hover,.sm-bulkBtn:hover{outline:none;box-shadow:none}",
+      ".sm-bulkBar .sm-bulkBtn{cursor:pointer;color:var(--dsw-alias-label-secondary,#666);background:transparent;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:8px;padding:4px 10px;font-size:12px;line-height:18px;display:inline-flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap;text-align:center}",
+      ".sm-bulkBar .sm-bulkBtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary,#111)}",
+      ".sm-bulkBar .sm-bulkBtn:disabled{opacity:.5;cursor:not-allowed}",
+      ".sm-bulkBar .sm-bulkBtnDanger{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary,#ec1313) 45%,transparent)}",
+      ".sm-bulkBar .sm-bulkBtnDanger:hover:not(:disabled){color:var(--dsw-alias-label-primary-foreground,#fff);background:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary)}",
+      "",
+      ".sm-bulkRowCheckbox{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;flex:none}",
+      ".sm-bulkRowCheckbox input{width:14px;height:14px;cursor:pointer;margin:0}",
+      ".sm-bulkRowCheckbox input:disabled{cursor:not-allowed}",
+      ".sm-rowBulkSelected{border-color:var(--dsw-alias-state-business-primary,#356ae6);background:var(--dsw-alias-state-business-tertiary,rgba(53,106,230,.06))}",
+      ".sm-bulkDialog.sm-nativeDialogLayer{position:fixed;left:calc(50vw + 184px);top:calc(50vh - 90px);width:360px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);display:block;align-items:initial;justify-content:initial;box-sizing:border-box;background:transparent;border:0;box-shadow:none;padding:0;inset:calc(50vh - 90px) auto auto calc(50vw + 308px);z-index:10002}.sm-bulkDialog.sm-nativeDialogLayer .sm-nativeDialogBackdrop{display:none}.sm-bulkDialog.sm-nativeDialogLayer .sm-nativeDialog{position:relative;left:auto;top:auto;transform:none;width:auto;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);display:flex;flex-direction:column;box-sizing:border-box;background:var(--sm-dialog-fill);color:var(--dsw-alias-label-primary,#111);border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.25);padding:0;overflow:hidden;animation:sm-confirmPop .14s ease-out}.sm-bulkDialog .sm-nativeDialogHeader{padding:10px 16px;border-bottom:1px solid var(--dsw-alias-border-l2,#eee);flex:none;position:relative;display:flex;align-items:center;justify-content:center;min-height:44px;box-sizing:border-box}.sm-bulkDialog .sm-nativeDialogTitle{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);margin:0;font-size:14px;line-height:20px;font-weight:600;text-align:center;width:auto;max-width:calc(100% - 32px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sm-bulkDialog .sm-nativeDialogBody{padding:12px 16px;display:flex;flex-direction:column;gap:10px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary,#111);min-height:0;max-height:calc(100vh - 120px);overflow-y:auto}.sm-bulkDialog .sm-nativeDialogFooter{padding:10px 16px;display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px}.sm-bulkDialog .sm-nativeDialogButton{min-height:28px;padding:3px 14px;font-size:12px;line-height:20px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:8px;cursor:pointer;background:transparent;color:var(--dsw-alias-label-primary,#111);text-align:center}.sm-bulkDialog .sm-nativeDialogConfirm{background:var(--dsw-alias-state-business-primary,#356ae6);color:var(--dsw-alias-label-primary-foreground,#fff);border-color:var(--dsw-alias-state-business-primary,#356ae6)}.sm-bulkDialog .sm-nativeDialogConfirm:hover:not(:disabled){filter:brightness(.94)}.sm-bulkDialog .sm-nativeDialogDanger{background:var(--dsw-alias-state-error-primary,#d92d20);color:var(--dsw-alias-label-primary-foreground,#fff);border-color:var(--dsw-alias-state-error-primary,#d92d20)}.sm-bulkDialog .sm-nativeDialogDanger:hover:not(:disabled){filter:brightness(.92)}.sm-bulkDialog .sm-nativeDialog select.sm-viewSelect{font-size:13px;line-height:20px;height:32px;padding:5px 26px 5px 10px}",
+      ".sm-bulkDialog .sm-nativeDialog{width:100%;max-height:min(640px,calc(100vh - 32px))}",
+      ".sm-bulkDialogBody{display:flex;flex-direction:column;gap:12px;min-height:0}",
+      ".sm-bulkDialogSummary{font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary,#111)}",
+      ".sm-bulkDialogWarn{display:flex;align-items:flex-start;gap:8px;color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:18px;background:color-mix(in srgb,var(--dsw-alias-state-error-primary,#ec1313) 8%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-error-primary,#ec1313) 25%,transparent);border-radius:8px;padding:8px 10px;white-space:pre-line}",
+      ".sm-bulkSessionList{display:flex;flex-direction:column;gap:4px;max-height:200px;overflow:auto;border:1px solid var(--dsw-alias-border-l2,#eee);border-radius:8px;padding:6px}",
+      ".sm-bulkSessionItem{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#666);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+      ".sm-bulkProgressBar{position:relative;height:8px;background:var(--dsw-alias-bg-skeleton,#0000000a);border-radius:4px;overflow:hidden}",
+      ".sm-bulkProgressFill{position:absolute;top:0;left:0;bottom:0;background:var(--dsw-alias-state-business-primary,#356ae6);transition:width .2s ease}",
+      ".sm-bulkResultGroup{display:flex;flex-direction:column;gap:6px}",
+      ".sm-bulkResultHeader{font-size:12px;line-height:18px;font-weight:500;color:var(--dsw-alias-label-secondary,#666)}",
+      ".sm-bulkResultList{display:flex;flex-direction:column;gap:2px;max-height:160px;overflow:auto;border:1px solid var(--dsw-alias-border-l2,#eee);border-radius:8px;padding:6px}",
+      ".sm-bulkResultItem{display:flex;flex-direction:column;gap:2px;padding:4px 6px;font-size:12px;line-height:18px;border-radius:6px;cursor:default}",
+      ".sm-bulkResultItem:hover{background:var(--dsw-alias-interactive-bg-hover)}",
+      ".sm-bulkResultItemTitle{color:var(--dsw-alias-label-primary,#111);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+      ".sm-bulkResultItemReason{color:var(--dsw-alias-state-error-primary);font-size:11px;line-height:16px;word-break:break-word}",
+      ".sm-bulkResultItemReasonSkip{color:var(--dsw-alias-label-tertiary,#888)}",
+      ".sm-bulkResultFooter{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}",
+      "[class*=footerActions]:has(.sm-footerBtn-wide),[class*=footer-actions]:has(.sm-footerBtn-wide),[class*=footer]:has(> .sm-footerBtn-wide),[class*=footer] > div:has(> .sm-footerBtn-wide){flex-wrap:wrap;align-content:flex-start;height:auto}",
+      ".sm-footerBtn-wide{flex:1 1 100%;display:flex;align-items:center;gap:8px;width:calc(100% + 8px);height:34px;margin:4px -4px 4px;padding:6px 2px 6px 10px;box-sizing:border-box;border:none;border-radius:12px;cursor:pointer;overflow:hidden;font-size:14px;line-height:22px}",
+      ".sm-footerBtn-wide:hover,.sm-footerBtn-wide:focus-visible{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}",
+      ".sm-footerBtn-rail{width:36px;height:36px;padding:0;justify-content:center;border-radius:12px;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border:0;display:inline-flex;align-items:center}",
+      ".sm-footerBtn-rail:hover,.sm-footerBtn-rail:focus-visible{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}",
+      ".sm-footerBtn-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;max-width:100%}",
+      ".sm-overlayLayer{position:fixed;inset:0;pointer-events:none}",
+      ".sm-overlayLayer>*{pointer-events:auto}",
+      ".sm-overlayBackdrop{position:fixed;inset:0;background:transparent;pointer-events:auto}",
+      ".sm-panelNav{display:inline-flex;align-items:center;background:var(--dsw-alias-bg-layer-2,rgba(128,128,128,0.12));border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:8px;padding:2px;gap:2px;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:0}",
+      ".sm-panelNavTab{border:0;background:transparent;color:var(--dsw-alias-label-secondary,#666);font-size:13px;line-height:20px;font-weight:500;padding:2px 14px;border-radius:6px;cursor:pointer;transition:all .15s ease;white-space:nowrap;outline:none}",
+      ".sm-panelNavTab:hover:not(:disabled){color:var(--dsw-alias-label-primary,#111)}",
+      ".sm-panelNavTab.sm-on{background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#111);box-shadow:0 1px 3px rgba(0,0,0,0.12),0 1px 2px rgba(0,0,0,0.06);font-weight:600}",
+      ".sm-switch{position:relative;width:38px;height:22px;flex:0 0 38px;min-width:38px;min-height:22px;max-width:38px;max-height:22px;padding:0;border-radius:11px;border:1px solid var(--dsw-alias-border-l2,#ddd);background:var(--dsw-alias-bg-layer-2,rgba(128,128,128,0.25));cursor:pointer;transition:background .2s cubic-bezier(0.4,0,0.2,1),border-color .2s cubic-bezier(0.4,0,0.2,1);box-sizing:border-box;display:inline-flex;align-items:center;overflow:hidden}",
+      ".sm-switch:hover:not(:disabled){border-color:var(--dsw-alias-border-l1,#bbb)}",
+      ".sm-switch.sm-switchChecked{background:var(--dsw-alias-state-business-primary,#356ae6);border-color:var(--dsw-alias-state-business-primary,#356ae6)}",
+      ".sm-switch:disabled{opacity:0.4;cursor:not-allowed}",
+      ".sm-switchThumb{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-switch-thumb,#ffffff);transition:left 0.2s cubic-bezier(0.4,0,0.2,1);box-shadow:0 1px 3px rgba(0,0,0,0.22);display:flex;align-items:center;justify-content:center}",
+      ".sm-switchChecked .sm-switchThumb{left:18px}",
+      ".sm-switchSpinner{width:10px;height:10px;border:1.5px solid transparent;border-top-color:var(--dsw-alias-state-business-primary,#356ae6);border-radius:50%;animation:sm-spin 0.7s linear infinite}",
+      ".sm-rowArchived{opacity:0.72}",
+      ".sm-workspaceRowActions{display:flex;align-items:center;justify-content:flex-end;flex:0 0 44px;min-width:44px;max-width:44px}",
+      ".sm-workspaceRow .sm-rowMeta{display:block!important}",
+      ".sm-wsFilters{display:flex;flex-wrap:wrap;align-items:center;gap:6px;width:100%;min-width:0;box-sizing:border-box}",
+      ".sm-wsFilters .sm-markFiltersGroup{display:flex;flex-wrap:wrap;align-items:center;gap:6px}",
+      ".sm-wsFilters .sm-markFiltersSpacer{flex:1 1 auto;min-width:8px}",
+      ".sm-wsFilters .sm-wsSortSelect{height:28px;min-height:28px;font-size:11px;padding:3px 24px 3px 8px;line-height:18px;width:auto;min-width:120px;border-radius:8px;box-sizing:border-box;background-position:right 6px center;cursor:pointer}",
+      ".sm-wsSortSelect-en{min-width:138px}",
+      ".sm-wsFiltersBulk{display:flex;flex-wrap:wrap;align-items:center;gap:6px}",
+      "@media(max-width:720px){.sm-wsFilters .sm-markFiltersSpacer{display:none}.sm-wsFilters .sm-wsFiltersBulk{width:100%}}",
+      ".sm-visuallyHidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}",
+      "@media(max-width:720px){.sm-panelSelects{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.sm-panelDialog .sm-row{flex-wrap:wrap}.sm-panelDialog .sm-rowMain{flex-basis:100%}.sm-panelDialog .sm-rowActions{width:100%;min-width:0;flex:1 1 100%;justify-content:flex-start}}@media(max-width:540px){.sm-panelSelects{grid-template-columns:minmax(0,1fr)}}",
+    ].join("");
+
+    // Auto-follow DSH's theme. We detect DSH's current theme from
+    // body[data-ds-dark-theme] / color-scheme / data-theme / class tokens and
+    // mirror it onto <html data-sm-theme>. The scoped CSS rules above consume
+    // that attribute (light/dark fallback surface colour, local alias tokens).
+    // Deliberately no inline colour is written onto the dialogs any more:
+    // inline `!important` backgrounds/colors used to hard-code white / #1f1f23
+    // onto the dialog roots, which overrode any theme — including third-party
+    // themes that only publish --dsw-alias-* tokens.
+    const SM_THEME_ATTR = "data-sm-theme";
+    function smReadDshTheme() {
+      try {
+        const html = document.documentElement;
+        const body = document.body;
+        if (body && body.hasAttribute("data-ds-dark-theme")) return "dark";
+        const elements = [html, body].filter(Boolean);
+        const dark = /\b(dark|dim)\b/i;
+        const light = /\b(light|bright)\b/i;
+        for (const el of elements) {
+          const value = ["theme", "data-theme", "data-bs-theme", "color-scheme", "data-color-mode", "data-mode"]
+            .map((name) => String(el.getAttribute(name) || ""))
+            .join(" ");
+          if (dark.test(value)) return "dark";
+          if (light.test(value)) return "light";
+        }
+        for (const el of elements) {
+          const scheme = String(getComputedStyle(el).colorScheme || "").toLowerCase();
+          if (scheme.includes("dark")) return "dark";
+          if (scheme.includes("light")) return "light";
+        }
+        const bg = body ? getComputedStyle(body).backgroundColor : "";
+        const match = bg.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+        if (match) {
+          const luminance = (Number(match[1]) * 299 + Number(match[2]) * 587 + Number(match[3]) * 114) / 1000;
+          return luminance < 128 ? "dark" : "light";
+        }
+      } catch (_) { /* ignore */ }
+      return "light";
+    }
+    function smApplyTheme() {
+      try {
+        const theme = smReadDshTheme();
+        document.documentElement.setAttribute(SM_THEME_ATTR, theme);
+      } catch (_) { /* ignore */ }
+    }
+    smApplyTheme();
+    if (typeof MutationObserver === "function") {
+      try {
+        const observer = new MutationObserver(() => smApplyTheme());
+        const options = { attributes: true, attributeFilter: ["class", "theme", "data-theme", "data-bs-theme", "data-ds-dark-theme", "data-color-mode", "data-mode", "color-scheme", "style"] };
+        if (document.documentElement) observer.observe(document.documentElement, options);
+        if (document.body) observer.observe(document.body, options);
+        observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+      } catch (_) { /* ignore */ }
+    }
+
+    // "Dialog opacity" preference (Issue #23).
+    //
+    // Generic, theme-agnostic escape hatch for third-party themes whose
+    // dialog surface does not match the plugin's own fill: the user tunes how
+    // much of *this plugin's* dialog background is painted, and whatever sits
+    // behind it (the theme's own surface) shows through. No theme plugin is
+    // detected or named, and no third-party CSS variable is read.
+    //
+    // The value is stored as a percentage in the plugin's own CSS variable on
+    // <html>; the CSS rules above turn it into the alpha channel of the dialog
+    // fill only, leaving text, buttons, inputs, borders and hover states
+    // opaque.
+    const SM_DIALOG_OPACITY = { min: 50, max: 100, step: 5, default: 100 };
+    const SM_DIALOG_OPACITY_KEY = "dsh-session-manager-dialog-opacity";
+    const SM_DIALOG_OPACITY_VAR = "--sm-dialog-opacity";
+    function smNormalizeDialogOpacity(value) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return SM_DIALOG_OPACITY.default;
+      const { min, max, step } = SM_DIALOG_OPACITY;
+      if (numeric <= min) return min;
+      if (numeric >= max) return max;
+      const snapped = min + Math.round((numeric - min) / step) * step;
+      return Math.min(max, Math.max(min, snapped));
+    }
+    function smReadDialogOpacity() {
+      try {
+        if (typeof localStorage !== "undefined") {
+          const raw = localStorage.getItem(SM_DIALOG_OPACITY_KEY);
+          if (raw !== null && raw !== "") return smNormalizeDialogOpacity(raw);
+        }
+      } catch (_) { /* storage unavailable: fall back to the default */ }
+      return SM_DIALOG_OPACITY.default;
+    }
+    function applyDialogOpacity(value) {
+      const percent = smNormalizeDialogOpacity(value);
+      try {
+        if (typeof document !== "undefined" && document.documentElement && document.documentElement.style) {
+          document.documentElement.style.setProperty(SM_DIALOG_OPACITY_VAR, percent + "%");
+        }
+      } catch (_) { /* ignore */ }
+      return percent;
+    }
+    applyDialogOpacity(smReadDialogOpacity());
+
+    const CSS_ID = "dsh-session-manager/session-manager";
+    const SM_CSS_SELECTOR = "style[data-plugin-css=" + JSON.stringify(CSS_ID) + "]";
+    if (typeof document !== "undefined" && typeof document.createElement === "function") {
+      let styleTag = typeof document.querySelector === "function" ? document.querySelector(SM_CSS_SELECTOR) : null;
+      if (!styleTag) {
+        styleTag = document.createElement("style");
+        styleTag.dataset.plugin = "dsh-session-manager";
+        styleTag.dataset.pluginCss = CSS_ID;
+        if (document.head && typeof document.head.appendChild === "function") document.head.appendChild(styleTag);
+      }
+      // Always rewrite the contents. A client-plugin hot reload re-executes the
+      // bundle inside the same page but leaves the <style> tag it created
+      // earlier in place; skipping the write there would silently keep the
+      // previous version's rules while the new JS (e.g. a new setting) is
+      // already live -- exactly the "setting present but has no effect" bug.
+      styleTag.textContent = css;
+    }
+
+
+    // Anchor the session manager panel to the sidebar right edge so it
+    // always fits within the sidebar area, regardless of viewport size.
+    const SM_PANEL_CSS_ID = "dsh-session-manager/session-manager-anchor";
+    const getSidebarRight = () => {
+      if (typeof document === "undefined") return 0;
+      const candidates = [
+        "[data-dsh-sidebar]",
+        "[data-testid=sidebar]",
+        "[aria-label=会话][role=navigation]",
+        "aside",
+        ".dsw-sidebar"
+      ];
+      for (const sel of candidates) {
+        const el = document.querySelector(sel);
+        if (el !== null) {
+          try {
+            const rect = el.getBoundingClientRect();
+            if (rect.right > 80 && rect.right < (window.innerWidth || 1024) - 40) {
+              return Math.round(rect.right);
+            }
+          } catch (_) {}
+        }
+      }
+      return 0;
+    };
+    const installAnchor = () => {
+      if (typeof document === "undefined") return;
+      if (document.querySelector("style[data-plugin-css=" + JSON.stringify(SM_PANEL_CSS_ID) + "]") !== null) return;
+      const tag = document.createElement("style");
+      tag.dataset.plugin = "dsh-session-manager";
+      tag.dataset.pluginCss = SM_PANEL_CSS_ID;
+      tag.textContent = ":root{--sm-panel-left:8px}";
+      document.head.appendChild(tag);
+      const updateLeft = () => {
+        const sbRight = getSidebarRight();
+        const right = sbRight > 0 ? sbRight + 8 : 8;
+        document.documentElement.style.setProperty("--sm-panel-left", right + "px");
+      };
+      updateLeft();
+      window.addEventListener("resize", updateLeft);
+    };
+    try { installAnchor(); } catch (_) {}
+
+    const h = (type, props, ...children) => React.createElement(type, props, ...children);
+
+    let overlayRootElement = null;
+    function getOverlayRoot() {
+      if (typeof document === "undefined" || !document.body) return null;
+      if (typeof document.createElement !== "function") return null;
+      const contains = typeof document.body.contains === "function" ? (el) => document.body.contains(el) : () => true;
+      if (!overlayRootElement || !contains(overlayRootElement)) {
+        let el = typeof document.getElementById === "function"
+          ? document.getElementById("dsh-session-manager-overlay-root")
+          : (typeof document.querySelector === "function" ? document.querySelector("#dsh-session-manager-overlay-root") : null);
+        if (!el) {
+          el = document.createElement("div");
+          el.id = "dsh-session-manager-overlay-root";
+          el.style.position = "fixed";
+          el.style.top = "0";
+          el.style.left = "0";
+          el.style.width = "100%";
+          el.style.height = "100%";
+          el.style.zIndex = "1050";
+          el.style.overflow = "visible";
+          el.style.pointerEvents = "none";
+          if (typeof document.body.appendChild === "function") {
+            document.body.appendChild(el);
+          }
+        }
+        // Re-assert the z-index on an element created by an earlier version
+        // (a client-plugin hot reload re-executes this module in the same page
+        // and reuses the existing node, whose inline style would otherwise keep
+        // the old value). Must stay below DSH's 1100 floating/tooltip tier and
+        // above its 1000 backdrop tier -- see the layering contract in the
+        // stylesheet.
+        if (el.style && el.style.zIndex !== "1050") el.style.zIndex = "1050";
+        overlayRootElement = el;
+      }
+      try {
+        if (document.documentElement && typeof document.documentElement.getAttribute === "function") {
+          const currentTheme = document.documentElement.getAttribute(SM_THEME_ATTR);
+          if (currentTheme && overlayRootElement && typeof overlayRootElement.setAttribute === "function") {
+            if (overlayRootElement.getAttribute(SM_THEME_ATTR) !== currentTheme) {
+              overlayRootElement.setAttribute(SM_THEME_ATTR, currentTheme);
+            }
+          }
+        }
+      } catch (_) {}
+      return overlayRootElement;
+    }
+
+    function getPortalFn() {
+      if (typeof React.createPortal === "function") return React.createPortal;
+      if (typeof window !== "undefined") {
+        if (window.__smReactDOM && typeof window.__smReactDOM.createPortal === "function") return window.__smReactDOM.createPortal;
+        if (window.ReactDOM && typeof window.ReactDOM.createPortal === "function") return window.ReactDOM.createPortal;
+        if (window.React && typeof window.React.createPortal === "function") return window.React.createPortal;
+      }
+      try {
+        const RDOM = require("react-dom");
+        if (RDOM && typeof RDOM.createPortal === "function") return RDOM.createPortal;
+      } catch (_) {}
+      try {
+        const RDOMC = require("react-dom/client");
+        if (RDOMC && typeof RDOMC.createPortal === "function") return RDOMC.createPortal;
+      } catch (_) {}
+      return null;
+    }
+
+    function renderInOverlay(vnode) {
+      if (!vnode) return null;
+      const root = getOverlayRoot();
+      const portal = getPortalFn();
+      if (portal && root) {
+        return portal(vnode, root);
+      }
+      return vnode;
+    }
+
+    function OverlayLayer({ children, className, style, onBackdropClick, role = "presentation", onKeyDown }) {
+      const zRef = useRef(null);
+      if (zRef.current === null) {
+        zRef.current = nextDialogZ();
+      }
+      useEffect(() => {
+        registerDialogZ(zRef.current);
+        return () => unregisterDialogZ(zRef.current);
+      }, []);
+      const root = getOverlayRoot();
+      const portal = getPortalFn();
+
+      const layerStyle = {
+        position: "fixed",
+        inset: "0",
+        zIndex: zRef.current,
+        pointerEvents: "none",
+        ...(style || {})
+      };
+
+      const content = h("div", {
+        className: "sm-overlayLayer " + (className || ""),
+        style: layerStyle,
+        role: role,
+        onKeyDown: onKeyDown
+      },
+        onBackdropClick ? h("div", {
+          className: "sm-nativeDialogBackdrop sm-overlayBackdrop",
+          style: {
+            position: "fixed",
+            inset: "0",
+            background: "transparent",
+            pointerEvents: "auto",
+            zIndex: -1
+          },
+          onClick: (e) => {
+            if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+            if (e && typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+            if (e.target === e.currentTarget && onBackdropClick) {
+              onBackdropClick(e);
+            }
+          }
+        }) : null,
+        children
+      );
+
+      if (portal && root) {
+        return portal(content, root);
+      }
+      return content;
+    }
+
+    const raf = typeof requestAnimationFrame === "function"
+      ? requestAnimationFrame
+      : (fn) => {
+          if (typeof fn === "function") {
+            try { fn(); } catch (_) {}
+          }
+          return 0;
+        };
+    const caf = typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : (id) => clearTimeout(id);
+
+    function computeFloatingCoords(anchor, options = {}) {
+      const {
+        placement = "bottom-end",
+        dialogWidth = 360,
+        dialogHeight = 220,
+        gap = 8,
+        margin = 16
+      } = options;
+
+      const winW = (typeof window !== "undefined" && window.innerWidth) ? window.innerWidth : 1024;
+      const winH = (typeof window !== "undefined" && window.innerHeight) ? window.innerHeight : 768;
+      const m = typeof margin === "number" ? margin : 16;
+      const g = typeof gap === "number" ? gap : 8;
+      const w = Math.min(dialogWidth || 360, Math.max(100, winW - m * 2));
+      const h = Math.min(dialogHeight || 220, Math.max(100, winH - m * 2));
+
+      // Case 1: Static coordinate anchor
+      if (anchor && typeof anchor.top === "number" && typeof anchor.left === "number" && typeof anchor.getBoundingClientRect !== "function") {
+        const sbRight = getSidebarRight();
+        const minLeft = Math.max(m, sbRight > 0 ? sbRight + 8 : m);
+        return { top: anchor.top, left: Math.max(minLeft, anchor.left) };
+      }
+
+      // Find Session Management Panel if mounted
+      let panelEl = null;
+      if (typeof document !== "undefined") {
+        panelEl = document.querySelector(".sm-panelDialog:not(.sm-annotationSurface)");
+      }
+
+      // Case 2: Anchor element outside panel (e.g. SessionManagerHeader actions in title bar)
+      const getAnchorDomNode = (a) => {
+        if (!a) return null;
+        if (typeof Node !== "undefined" && a instanceof Node) return a;
+        if (a.nodeType === 1 && typeof a.contains === "function") return a;
+        if (a.current) {
+          if (typeof Node !== "undefined" && a.current instanceof Node) return a.current;
+          if (a.current.nodeType === 1 && typeof a.current.contains === "function") return a.current;
+        }
+        return null;
+      };
+
+      let isAnchorInsidePanel = false;
+      const anchorNode = getAnchorDomNode(anchor);
+      if (panelEl && anchorNode) {
+        try {
+          isAnchorInsidePanel = typeof panelEl.contains === "function" && Boolean(panelEl.contains(anchorNode));
+        } catch (_) {
+          isAnchorInsidePanel = false;
+        }
+      }
+
+      const getAnchorRect = (a) => {
+        if (!a) return null;
+        if (typeof a.getBoundingClientRect === "function") {
+          try { return a.getBoundingClientRect(); } catch (_) {}
+        }
+        if (a.current && typeof a.current.getBoundingClientRect === "function") {
+          try { return a.current.getBoundingClientRect(); } catch (_) {}
+        }
+        return null;
+      };
+
+      const r = getAnchorRect(anchor);
+      if (r && !isAnchorInsidePanel && (r.width > 0 || r.height > 0 || r.top !== 0 || r.bottom !== 0)) {
+        let left;
+        if (placement.endsWith("-end")) {
+          left = r.right - w;
+        } else if (placement.endsWith("-start")) {
+          left = r.left;
+        } else {
+          left = r.left + (r.width - w) / 2;
+        }
+        const sbRight = getSidebarRight();
+        const minLeft = Math.max(m, sbRight > 0 ? sbRight + 8 : m);
+        left = Math.max(minLeft, Math.min(left, Math.max(minLeft, winW - w - m)));
+
+        let top;
+        const fitsBelow = (r.bottom + g + h) <= (winH - m);
+        const fitsAbove = (r.top - g - h) >= m;
+
+        if (placement.startsWith("top")) {
+          if (fitsAbove || !fitsBelow) {
+            top = r.top - h - g;
+          } else {
+            top = r.bottom + g;
+          }
+          top = Math.max(m, Math.min(top, winH - h - m));
+        } else {
+          if (!fitsBelow && fitsAbove && r.top > h + g + m) {
+            top = r.top - h - g;
+          } else {
+            top = r.bottom + g;
+          }
+          top = Math.max(m, top);
+        }
+        return { top: Math.round(top), left: Math.round(left) };
+      }
+
+      // Case 3: Secondary dialog in Session Management Panel -> centered horizontally and vertically, following panel
+      if (panelEl && typeof panelEl.getBoundingClientRect === "function") {
+        const pr = panelEl.getBoundingClientRect();
+        if (pr && (pr.width > 0 || pr.height > 0)) {
+          // Centered horizontally and vertically relative to Session Management Panel
+          const panelCenterX = pr.left + pr.width / 2;
+          const panelCenterY = pr.top + pr.height / 2;
+
+          // Clamped within viewport to prevent overflow and keep safe margin
+          const centerLeft = Math.max(m + w / 2, Math.min(panelCenterX, winW - m - w / 2));
+          const centerTop = Math.max(m + h / 2, Math.min(panelCenterY, winH - m - h / 2));
+
+          return { top: Math.round(centerTop), left: Math.round(centerLeft), centered: true };
+        }
+      }
+
+      // Case 4: Viewport center fallback (shifted away from sidebar if visible)
+      const sbRight = getSidebarRight();
+      let centerLeft = Math.round(winW / 2);
+      if (sbRight > 0) {
+        const contentCenterX = Math.round(sbRight + (winW - sbRight) / 2);
+        const minCenterLeft = Math.round(sbRight + 8 + w / 2);
+        centerLeft = Math.max(minCenterLeft, contentCenterX);
+      }
+      const centerTop = Math.round(winH / 2);
+      return { top: centerTop, left: centerLeft, centered: true };
+    }
+
+    function useFloatingPosition(anchor, open, options = {}) {
+      const {
+        placement = "bottom-end",
+        dialogWidth = 360,
+        dialogHeight = 220,
+        gap = 8,
+        margin = 16
+      } = options;
+
+      const [coords, setCoords] = useState(() => {
+        if (!open) return null;
+        return computeFloatingCoords(anchor, options);
+      });
+
+      const anchorRef = useRef(anchor);
+      anchorRef.current = anchor;
+      const optionsRef = useRef(options);
+      optionsRef.current = options;
+
+      useEffect(() => {
+        if (!open) return;
+
+        let frameId = 0;
+        const update = () => {
+          caf(frameId);
+          frameId = raf(() => {
+            const nextCoords = computeFloatingCoords(anchorRef.current, optionsRef.current);
+            if (nextCoords) {
+              setCoords((prev) => {
+                if (prev && prev.top === nextCoords.top && prev.left === nextCoords.left && prev.centered === nextCoords.centered) {
+                  return prev;
+                }
+                return nextCoords;
+              });
+            }
+          });
+        };
+
+        update();
+
+        if (typeof window !== "undefined") {
+          window.addEventListener("resize", update);
+          window.addEventListener("scroll", update, true);
+          if (window.visualViewport) {
+            window.visualViewport.addEventListener("resize", update);
+            window.visualViewport.addEventListener("scroll", update);
+          }
+        }
+
+        const pollTimer = setInterval(update, 100);
+
+        let ro = null;
+        if (typeof ResizeObserver === "function") {
+          try {
+            ro = new ResizeObserver(update);
+            const a = anchorRef.current;
+            const aEl = a && (a.nodeType === 1 ? a : (a.current && a.current.nodeType === 1 ? a.current : null));
+            if (aEl) {
+              ro.observe(aEl);
+              if (aEl.parentElement) ro.observe(aEl.parentElement);
+            }
+            if (typeof document !== "undefined") {
+              const panelEl = document.querySelector(".sm-panelDialog:not(.sm-annotationSurface)");
+              if (panelEl) ro.observe(panelEl);
+              if (document.body) ro.observe(document.body);
+            }
+          } catch (_) {}
+        }
+
+        return () => {
+          caf(frameId);
+          clearInterval(pollTimer);
+          if (typeof window !== "undefined") {
+            window.removeEventListener("resize", update);
+            window.removeEventListener("scroll", update, true);
+            if (window.visualViewport) {
+              window.visualViewport.removeEventListener("resize", update);
+              window.visualViewport.removeEventListener("scroll", update);
+            }
+          }
+          if (ro) ro.disconnect();
+        };
+      }, [open, placement, dialogWidth, dialogHeight, gap, margin]);
+
+      return coords;
+    }
+
+    const callApi = (path, payload) => fetch(API + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload || {}) }).then((r) => r.json());
+    const fetchApi = (path, options) => fetch(API + path, options).then((r) => r.json());
+    // Run a bulk action across many sessionIds. /batch already does per-id
+    // error reporting, so partial failures come back as {summary, items}
+    // with per-id success/failed/skipped status. Cancellation is best-effort
+    // because the v0.1.7 host does not reliably support req.on("close").
+    async function runBatch(args, onProgress) {
+      const { action, sessionIds, payload } = args || {};
+      const controller = new AbortController();
+      try {
+        const response = await fetch(API + "/batch", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action, sessionIds: sessionIds || [], payload: payload || {} }),
+          signal: controller.signal
+        });
+        const data = await response.json();
+        if (data && data.ok) {
+          const result = data.result || {};
+          const items = Array.isArray(result.items) ? result.items : [];
+          if (typeof onProgress === "function") onProgress({ done: items.length, total: (sessionIds || []).length, lastItem: items[items.length - 1] || null });
+          return { summary: result.summary || { total: items.length, success: 0, failed: 0, skipped: 0 }, items, aborted: !!result.aborted };
+        }
+        const error = new Error((data && data.error) || "batch failed");
+        error.code = (data && data.code) || "bad-request";
+        throw error;
+      } catch (error) {
+        if (error && error.name === "AbortError") return { summary: { total: 0, success: 0, failed: 0, skipped: 0 }, items: [], aborted: true };
+        throw error;
+      }
+    }
+
+    // Archive/unarchive are *client-state* commands in DSH: the official entry
+    // point receives the complete resulting archive set and installs it into the
+    // client workspace model, drops the session from the pin set, and (through
+    // uiWorkspace, its UI-facing wrapper) clears the main view when the archived
+    // session was the main one. It also enforces the host's own activity rule:
+    // archiving a session with running activity fails as `workspace/session-active`
+    // unless the caller passes `stopActivity`, and the command facade underneath
+    // throws on that failure rather than reporting success.
+    //
+    // Writing `workspaceRegistry.archivedSessionIds` from this plugin's own
+    // endpoint (the legacy path below) skips every one of those steps, so other
+    // surfaces -- including the requesting browser's own sidebar -- kept showing
+    // the session until some unrelated refresh replaced the baseline (issue #26).
+    // The legacy endpoints stay as the fallback for host builds that expose
+    // neither command, so the plugin keeps working on older DSH versions.
+    let activeClientCtx = null;
+
+    const workspaceCommandName = action => (action === "archive" ? "archiveSession" : "unarchiveSession");
+    const findWorkspaceCommand = (name) => {
+      const ui = activeClientCtx?.uiWorkspace;
+      if (ui && typeof ui[name] === "function") return { run: (sessionId, options) => ui[name](sessionId, options), via: "uiWorkspace" };
+      const workspaces = activeClientCtx?.workspaces;
+      if (workspaces && typeof workspaces[name] === "function") return { run: (sessionId, options) => workspaces[name](sessionId, options), via: "workspaces" };
+      return null;
+    };
+    /** Whether the host exposes DSH's own archive/unarchive command. */
+    const hasWorkspaceCommand = action => findWorkspaceCommand(workspaceCommandName(action)) !== null;
+
+    /**
+     * Archive or unarchive one session.
+     * Uses DSH's own command when the host provides it; otherwise falls back to
+     * this plugin's host endpoints. Throws on failure in both paths, so bulk
+     * reporting never turns a rejected archive into a silent success.
+     * `options` is forwarded to the official command only (the plugin's own
+     * endpoints have no equivalent), and stays empty by default: the plugin must
+     * never stop a running session's activity without an explicit decision.
+     */
+    async function runArchiveCommand(action, sessionId, options) {
+      const command = findWorkspaceCommand(workspaceCommandName(action));
+      if (command) {
+        await command.run(sessionId, options);
+        return { sessionId, status: "success", via: command.via };
+      }
+      if (action === "archive") {
+        const response = await callApi("/batch", { action: "archive", sessionIds: [sessionId], payload: options || {} });
+        if (!response || response.ok !== true) throw new Error((response && response.error) || "archive failed");
+        const item = (response.result && Array.isArray(response.result.items) ? response.result.items[0] : null) || null;
+        if (item && item.status === "failed") throw new Error(item.error || "archive failed");
+        return item || { sessionId, status: "success", via: "endpoint" };
+      }
+      const response = await callApi("/unarchive", { sessionId });
+      if (!response || response.ok !== true) throw new Error((response && response.error) || "unarchive failed");
+      return { sessionId, status: "success", via: "endpoint" };
+    }
+
+    const WORKSPACE_ARCHIVE_STORAGE_KEY = "dsh-session-manager-workspace-archive-v1";
+    const WORKSPACE_ARCHIVE_LEGACY_KEY = "dsh-workspace-hide.hidden.v2";
+    const WORKSPACE_MODEL_MARK = "__dshSmWorkspaceModel";
+    const WORKSPACE_CREATE_MARK = "__dshSmWorkspaceCreate";
+    const WORKSPACE_ORIGINAL_CREATE = "__dshSmWorkspaceOrigCreate";
+    const UI_CONNECT_MARK = "__dshSmUiConnect";
+    const UI_ORIGINAL_CONNECT = "__dshSmUiOrigConnect";
+
+    const pathKey = (value) => {
+      if (typeof value !== "string" || value === "") return "";
+      const path = value.replace(/\\/g, "/").replace(/\/+$/, "") || "/";
+      return /^[a-z]:(?:\/|$)/i.test(path) || path.startsWith("//") ? path.toLowerCase() : path;
+    };
+
+    const workspaceArchiveStore = (() => {
+      const archives = new Map();
+      const busyWorkspaces = new Set();
+      const listeners = new Set();
+      let version = 0;
+      let readRaw = null;
+      let viewCache = null;
+      let viewRaw = null;
+      let viewVersion = -1;
+
+      const isId = v => typeof v === "string" && v !== "";
+
+      function loadLocal() {
+        try {
+          if (typeof localStorage === "undefined") return;
+          const text = localStorage.getItem(WORKSPACE_ARCHIVE_STORAGE_KEY);
+          if (text) {
+            const parsed = JSON.parse(text);
+            if (parsed && typeof parsed.archives === "object" && !Array.isArray(parsed.archives)) {
+              for (const [wsId, rec] of Object.entries(parsed.archives)) {
+                if (!isId(wsId) || !rec) continue;
+                archives.set(wsId, {
+                  workspaceId: wsId,
+                  archived: rec.archived === true,
+                  archivedAt: typeof rec.archivedAt === "number" ? rec.archivedAt : Date.now(),
+                  sessionIds: Array.isArray(rec.sessionIds) ? rec.sessionIds.filter(isId) : [],
+                  pending: Array.isArray(rec.pending) ? rec.pending.filter(isId) : []
+                });
+              }
+              return;
+            }
+          }
+          const legacy = localStorage.getItem(WORKSPACE_ARCHIVE_LEGACY_KEY);
+          if (legacy) {
+            const parsed = JSON.parse(legacy);
+            if (parsed && typeof parsed.hidden === "object" && !Array.isArray(parsed.hidden)) {
+              for (const [wsId, ids] of Object.entries(parsed.hidden)) {
+                if (!isId(wsId)) continue;
+                archives.set(wsId, {
+                  workspaceId: wsId,
+                  archived: true,
+                  archivedAt: Date.now(),
+                  sessionIds: Array.isArray(ids) ? ids.filter(isId) : [],
+                  pending: []
+                });
+              }
+              saveLocal();
+            }
+          }
+        } catch (_) {}
+      }
+
+      function saveLocal() {
+        try {
+          if (typeof localStorage === "undefined") return;
+          const obj = {};
+          for (const [wsId, rec] of archives) {
+            if (rec.archived === true || (Array.isArray(rec.pending) && rec.pending.length > 0) || (Array.isArray(rec.sessionIds) && rec.sessionIds.length > 0)) {
+              obj[wsId] = {
+                workspaceId: wsId,
+                archived: rec.archived === true,
+                archivedAt: rec.archivedAt,
+                sessionIds: rec.sessionIds,
+                pending: rec.pending
+              };
+            }
+          }
+          localStorage.setItem(WORKSPACE_ARCHIVE_STORAGE_KEY, JSON.stringify({ version: 1, archives: obj }));
+        } catch (_) {}
+      }
+
+      const EMPTY_WORKSPACES_SNAPSHOT = Object.freeze({ items: Object.freeze([]) });
+      let snapshotCache = { archives, version, busyWorkspaces };
+
+      loadLocal();
+
+      function notify() {
+        version += 1;
+        snapshotCache = { archives, version, busyWorkspaces };
+        viewCache = null;
+        viewRaw = null;
+        viewVersion = -1;
+        for (const listener of [...listeners]) {
+          try { listener(); } catch (_) {}
+        }
+      }
+
+      function rawSnapshot() {
+        if (typeof readRaw === "function") {
+          try { return readRaw() ?? EMPTY_WORKSPACES_SNAPSHOT; } catch (_) {}
+        }
+        return EMPTY_WORKSPACES_SNAPSHOT;
+      }
+
+      function getViewSnapshot() {
+        const raw = rawSnapshot();
+        if (viewCache !== null && viewRaw === raw && viewVersion === version) {
+          return viewCache;
+        }
+        viewRaw = raw;
+        viewVersion = version;
+
+        const items = Array.isArray(raw?.items) ? raw.items : [];
+        const baseArchived = Array.isArray(raw?.archivedSessionIds) ? raw.archivedSessionIds : [];
+
+        const hasArchived = [...archives.values()].some(r => r.archived === true);
+        if (!hasArchived) {
+          viewCache = raw;
+          return viewCache;
+        }
+
+        const visible = items.filter(item => {
+          const rec = archives.get(item.workspaceId || item.id);
+          return !rec || rec.archived !== true;
+        });
+
+        const archivedSet = new Set(baseArchived);
+        let changed = false;
+
+        for (const item of items) {
+          const wsId = item.workspaceId || item.id;
+          const rec = archives.get(wsId);
+          if (rec && rec.archived === true) {
+            const sids = Array.isArray(item.sessionIds) ? item.sessionIds : [];
+            for (const sid of sids) {
+              if (!archivedSet.has(sid)) {
+                archivedSet.add(sid);
+                changed = true;
+              }
+            }
+          }
+        }
+        for (const rec of archives.values()) {
+          if (rec.archived === true && Array.isArray(rec.sessionIds)) {
+            for (const sid of rec.sessionIds) {
+              if (!archivedSet.has(sid)) {
+                archivedSet.add(sid);
+                changed = true;
+              }
+            }
+          }
+        }
+
+        const finalArchived = changed ? [...archivedSet] : baseArchived;
+        viewCache = (visible.length === items.length && finalArchived === baseArchived)
+          ? raw
+          : { ...raw, items: visible, archivedSessionIds: finalArchived };
+        return viewCache;
+      }
+
+      function revealWorkspace(wsId, options = {}) {
+        if (!isId(wsId)) return null;
+        const existing = archives.get(wsId);
+        if (!existing || existing.archived !== true) return null;
+        const record = {
+          ...existing,
+          workspaceId: wsId,
+          archived: false,
+          sessionIds: Array.isArray(existing.sessionIds) ? [...existing.sessionIds] : [],
+          pending: Array.isArray(existing.pending) ? [...existing.pending] : []
+        };
+        archives.set(wsId, record);
+        saveLocal();
+        notify();
+        try {
+          callApi("/workspace-unarchive", { workspaceId: wsId, retainSessionIds: true }).catch(() => {});
+        } catch (_) {}
+        if (options && options.silent === false) {
+          const msg = smTranslate("notice.workspaceReAdded");
+          showNotice(msg);
+        }
+        return record;
+      }
+
+      function installWorkspaceCreate(workspacesService) {
+        if (!workspacesService || typeof workspacesService.create !== "function") return null;
+
+        let originalCreate = workspacesService[WORKSPACE_ORIGINAL_CREATE] || workspacesService.create;
+        while (originalCreate && (originalCreate.__dshSmWrapper || originalCreate[WORKSPACE_CREATE_MARK])) {
+          if (originalCreate.__dshSmUnderlying) originalCreate = originalCreate.__dshSmUnderlying;
+          else break;
+        }
+        workspacesService[WORKSPACE_ORIGINAL_CREATE] = originalCreate;
+
+        const wrappedCreate = async function (...args) {
+          const options = args[0];
+          const targetPath = typeof options === "string" ? options : (options && typeof options.path === "string" ? options.path : "");
+          let knownArchivedId = null;
+          if (targetPath) {
+            const raw = rawSnapshot();
+            const items = Array.isArray(raw?.items) ? raw.items : [];
+            const match = items.find(item => item.path && pathKey(item.path) === pathKey(targetPath));
+            if (match) {
+              const id = match.workspaceId || match.id;
+              if (id && archives.get(id)?.archived === true) {
+                knownArchivedId = id;
+                revealWorkspace(id, { silent: false });
+              }
+            }
+          }
+
+          const res = await originalCreate.apply(this, args);
+
+          const createdId = typeof res === "string" ? res : (res && (res.id || res.workspaceId));
+          const targetId = createdId || knownArchivedId;
+          if (targetId && archives.get(targetId)?.archived === true) {
+            revealWorkspace(targetId, { silent: false });
+          }
+
+          return res;
+        };
+        wrappedCreate.__dshSmWrapper = true;
+        wrappedCreate.__dshSmUnderlying = originalCreate;
+
+        const ownCreate = Object.getOwnPropertyDescriptor(workspacesService, "create");
+        try {
+          workspacesService.create = wrappedCreate;
+          Object.defineProperty(workspacesService, WORKSPACE_CREATE_MARK, { value: true, configurable: true, writable: true });
+        } catch (err) {
+          console.warn("[session-manager] Failed to wrap workspaces.create:", err);
+          return null;
+        }
+
+        return function dispose() {
+          try {
+            if (workspacesService.create === wrappedCreate) {
+              if (ownCreate !== undefined) Object.defineProperty(workspacesService, "create", ownCreate);
+              else workspacesService.create = originalCreate;
+            }
+            delete workspacesService[WORKSPACE_CREATE_MARK];
+            delete workspacesService[WORKSPACE_ORIGINAL_CREATE];
+          } catch (_) {}
+        };
+      }
+
+      function installConnectWorkspace(uiWorkspaceService) {
+        if (!uiWorkspaceService || typeof uiWorkspaceService.connectWorkspace !== "function") return null;
+
+        let originalConnect = uiWorkspaceService[UI_ORIGINAL_CONNECT] || uiWorkspaceService.connectWorkspace;
+        while (originalConnect && (originalConnect.__dshSmWrapper || originalConnect[UI_CONNECT_MARK])) {
+          if (originalConnect.__dshSmUnderlying) originalConnect = originalConnect.__dshSmUnderlying;
+          else break;
+        }
+        uiWorkspaceService[UI_ORIGINAL_CONNECT] = originalConnect;
+
+        const wrappedConnect = async function (workspaceId, ...rest) {
+          if (typeof workspaceId === "string" && archives.get(workspaceId)?.archived === true) {
+            revealWorkspace(workspaceId, { silent: true });
+          }
+          return await originalConnect.call(this, workspaceId, ...rest);
+        };
+        wrappedConnect.__dshSmWrapper = true;
+        wrappedConnect.__dshSmUnderlying = originalConnect;
+
+        const ownConnect = Object.getOwnPropertyDescriptor(uiWorkspaceService, "connectWorkspace");
+        try {
+          uiWorkspaceService.connectWorkspace = wrappedConnect;
+          Object.defineProperty(uiWorkspaceService, UI_CONNECT_MARK, { value: true, configurable: true, writable: true });
+        } catch (err) {
+          console.warn("[session-manager] Failed to wrap uiWorkspace.connectWorkspace:", err);
+          return null;
+        }
+
+        return function dispose() {
+          try {
+            if (uiWorkspaceService.connectWorkspace === wrappedConnect) {
+              if (ownConnect !== undefined) Object.defineProperty(uiWorkspaceService, "connectWorkspace", ownConnect);
+              else uiWorkspaceService.connectWorkspace = originalConnect;
+            }
+            delete uiWorkspaceService[UI_CONNECT_MARK];
+            delete uiWorkspaceService[UI_ORIGINAL_CONNECT];
+          } catch (_) {}
+        };
+      }
+
+      return {
+        getSnapshot: () => snapshotCache,
+        getVersion: () => version,
+        subscribe(listener) {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        isArchived(wsId) {
+          const rec = archives.get(wsId);
+          return rec ? rec.archived === true : false;
+        },
+        isBusy(wsId) {
+          return busyWorkspaces.has(wsId);
+        },
+        getRecord(wsId) {
+          return archives.get(wsId) || null;
+        },
+        getAllRecords() {
+          return archives;
+        },
+        rawSnapshot,
+        getViewSnapshot,
+        setReadRaw(fn) {
+          readRaw = fn;
+        },
+        notify,
+        syncFromHost(hostArchives) {
+          if (!hostArchives || typeof hostArchives !== "object" || Array.isArray(hostArchives)) return;
+          let changed = false;
+          for (const [wsId, rec] of Object.entries(hostArchives)) {
+            if (!isId(wsId) || !rec) continue;
+            const existing = archives.get(wsId);
+            if (!existing || existing.archived !== (rec.archived === true) || existing.sessionIds?.length !== (rec.sessionIds || []).length) {
+              archives.set(wsId, {
+                workspaceId: wsId,
+                archived: rec.archived === true,
+                archivedAt: typeof rec.archivedAt === "number" ? rec.archivedAt : Date.now(),
+                sessionIds: Array.isArray(rec.sessionIds) ? rec.sessionIds.filter(isId) : [],
+                pending: Array.isArray(rec.pending) ? rec.pending.filter(isId) : []
+              });
+              changed = true;
+            }
+          }
+          if (changed) {
+            saveLocal();
+            notify();
+          }
+        },
+        markBusy(wsId, busy) {
+          if (busy) busyWorkspaces.add(wsId);
+          else busyWorkspaces.delete(wsId);
+          notify();
+        },
+        saveArchiveRecord(wsId, record) {
+          archives.set(wsId, record);
+          saveLocal();
+          notify();
+        },
+        removeArchiveRecord(wsId) {
+          archives.delete(wsId);
+          saveLocal();
+          notify();
+        },
+        revealWorkspace,
+        installWorkspaceCreate,
+        installConnectWorkspace,
+        installWorkspaceModel(model) {
+          if (!model || model[WORKSPACE_MODEL_MARK] === true) return null;
+          const originalGetSnapshot = model.getSnapshot;
+          const originalSubscribe = model.subscribe;
+          if (typeof originalGetSnapshot !== "function" || typeof originalSubscribe !== "function") return null;
+
+          readRaw = () => {
+            try { return originalGetSnapshot.call(model); }
+            catch (err) { console.warn("[session-manager] Failed to read raw workspaces snapshot:", err); return { items: [] }; }
+          };
+
+          const wrappedGetSnapshot = function () {
+            return getViewSnapshot();
+          };
+          const wrappedSubscribe = function (listener) {
+            const off = originalSubscribe.call(model, listener);
+            listeners.add(listener);
+            return () => {
+              listeners.delete(listener);
+              if (typeof off === "function") off();
+            };
+          };
+
+          const ownGetSnapshot = Object.getOwnPropertyDescriptor(model, "getSnapshot");
+          const ownSubscribe = Object.getOwnPropertyDescriptor(model, "subscribe");
+
+          try {
+            model.getSnapshot = wrappedGetSnapshot;
+            model.subscribe = wrappedSubscribe;
+            Object.defineProperty(model, WORKSPACE_MODEL_MARK, { value: true, configurable: true });
+          } catch (err) {
+            console.warn("[session-manager] Failed to wrap workspaces.list:", err);
+            return null;
+          }
+
+          return function dispose() {
+            try {
+              if (model.getSnapshot === wrappedGetSnapshot) {
+                if (ownGetSnapshot !== undefined) Object.defineProperty(model, "getSnapshot", ownGetSnapshot);
+                else delete model.getSnapshot;
+              }
+              if (model.subscribe === wrappedSubscribe) {
+                if (ownSubscribe !== undefined) Object.defineProperty(model, "subscribe", ownSubscribe);
+                else delete model.subscribe;
+              }
+              if (model[WORKSPACE_MODEL_MARK] === true) delete model[WORKSPACE_MODEL_MARK];
+            } catch (_) {}
+            listeners.clear();
+            viewCache = null;
+            viewRaw = null;
+            viewVersion = -1;
+          };
+        }
+      };
+    })();
+
+    if (typeof window !== "undefined") {
+      window.revealWorkspace = (id, opts) => workspaceArchiveStore.revealWorkspace(id, opts);
+    }
+    if (typeof globalThis !== "undefined") {
+      globalThis.revealWorkspace = (id, opts) => workspaceArchiveStore.revealWorkspace(id, opts);
+    }
+
+    const SM_SELECT_SELECTOR = ".sm-viewSelect, .sm-settingsSelect, .sm-wsSortSelect, .sm-prioritySelectInline, .sm-panelDialog select, .sm-nativeDialog select, .sm-settingsCard select";
+
+    let activeCustomSelect = null;
+    let activeCustomMenu = null;
+
+    function closeCustomSelect() {
+      if (activeCustomMenu) {
+        try { activeCustomMenu.remove(); } catch (_) {}
+        activeCustomMenu = null;
+      }
+      if (typeof document !== "undefined") {
+        try {
+          const oldMenus = document.querySelectorAll(".sm-customSelectMenu");
+          for (let i = 0; i < oldMenus.length; i++) {
+            try { oldMenus[i].remove(); } catch (_) {}
+          }
+        } catch (_) {}
+      }
+      if (activeCustomSelect) {
+        try { activeCustomSelect.classList.remove("sm-selectExpanded"); } catch (_) {}
+        activeCustomSelect = null;
+      }
+    }
+
+    function applyCustomSelection(select, val) {
+      closeCustomSelect();
+      if (!select) return;
+      if (select.value !== val) {
+        try {
+          const descriptor = Object.getOwnPropertyDescriptor(window.HTMLSelectElement?.prototype || {}, "value");
+          if (descriptor && descriptor.set) {
+            descriptor.set.call(select, val);
+          } else {
+            select.value = val;
+          }
+        } catch (_) {
+          select.value = val;
+        }
+        try {
+          const Evt = typeof Event !== "undefined" ? Event : (typeof window !== "undefined" ? window.Event : null);
+          if (Evt) {
+            select.dispatchEvent(new Evt("input", { bubbles: true }));
+            select.dispatchEvent(new Evt("change", { bubbles: true }));
+          } else if (typeof select.dispatchEvent === "function") {
+            select.dispatchEvent({ type: "input", bubbles: true });
+            select.dispatchEvent({ type: "change", bubbles: true });
+          }
+        } catch (_) {
+          try {
+            select.dispatchEvent({ type: "input", bubbles: true });
+            select.dispatchEvent({ type: "change", bubbles: true });
+          } catch (_) {}
+        }
+        try {
+          const key = Object.keys(select).find(k => k.startsWith("__reactProps") || k.startsWith("__reactEventHandlers"));
+          if (key && typeof select[key]?.onChange === "function") {
+            select[key].onChange({ target: select, currentTarget: select });
+          }
+        } catch (_) {}
+      }
+    }
+
+    function openCustomSelect(select) {
+      if (!select || select.disabled) return;
+      if (activeCustomSelect === select && activeCustomMenu) {
+        closeCustomSelect();
+        return;
+      }
+      closeCustomSelect();
+
+      const options = Array.from(select.options || []);
+      if (options.length === 0) return;
+
+      const doc = select.ownerDocument || (typeof document !== "undefined" ? document : null);
+      if (!doc || !doc.body) return;
+
+      activeCustomSelect = select;
+      select.classList.add("sm-selectExpanded");
+
+      const menu = doc.createElement("div");
+      menu.className = "sm-customSelectMenu";
+      menu.setAttribute("role", "listbox");
+      const ariaLabel = select.getAttribute("aria-label");
+      if (ariaLabel) menu.setAttribute("aria-label", ariaLabel);
+
+      try {
+        const theme = doc.documentElement?.getAttribute?.("data-sm-theme") || (doc.body?.getAttribute?.("data-ds-dark-theme") === "true" ? "dark" : null);
+        if (theme && typeof menu.setAttribute === "function") menu.setAttribute("data-sm-theme", theme);
+        const cs = typeof window !== "undefined" && typeof window.getComputedStyle === "function" ? window.getComputedStyle(select) : null;
+        if (cs) {
+          if (cs.colorScheme) menu.style.colorScheme = cs.colorScheme;
+          if (cs.fontFamily) menu.style.fontFamily = cs.fontFamily;
+        }
+      } catch (_) {}
+
+      options.forEach((opt) => {
+        const item = doc.createElement("div");
+        const isSelected = opt.value === select.value || opt.selected;
+        item.className = "sm-customSelectOption" +
+          (isSelected ? " sm-customSelectOptionSelected" : "") +
+          (opt.disabled ? " sm-customSelectOptionDisabled" : "");
+        item.setAttribute("role", "option");
+        item.setAttribute("aria-selected", isSelected ? "true" : "false");
+        item.title = opt.title || opt.text || opt.label || opt.value || "";
+
+        const labelSpan = doc.createElement("span");
+        labelSpan.className = "sm-customSelectOptionLabel";
+        labelSpan.textContent = opt.text || opt.label || opt.value;
+        if (typeof item.appendChild === "function") {
+          item.appendChild(labelSpan);
+        } else if (item.children && Array.isArray(item.children)) {
+          item.children.push(labelSpan);
+        }
+
+        if (isSelected) {
+          const checkSpan = doc.createElement("span");
+          checkSpan.className = "sm-customSelectOptionCheck";
+          checkSpan.textContent = "✓";
+          if (typeof item.appendChild === "function") {
+            item.appendChild(checkSpan);
+          } else if (item.children && Array.isArray(item.children)) {
+            item.children.push(checkSpan);
+          }
+        }
+
+        const handleOptClick = (e) => {
+          if (e && e.preventDefault) e.preventDefault();
+          if (e && e.stopPropagation) e.stopPropagation();
+          if (opt.disabled) return;
+          applyCustomSelection(select, opt.value);
+        };
+        if (typeof item.addEventListener === "function") {
+          item.addEventListener("mousedown", handleOptClick);
+        } else {
+          item.onmousedown = handleOptClick;
+        }
+
+        if (typeof menu.appendChild === "function") {
+          menu.appendChild(item);
+        } else if (menu.children && Array.isArray(menu.children)) {
+          menu.children.push(item);
+        }
+      });
+
+      if (typeof doc.body?.appendChild === "function") {
+        doc.body.appendChild(menu);
+      }
+      activeCustomMenu = menu;
+
+      const rect = select.getBoundingClientRect();
+      const spaceBelow = (typeof window !== "undefined" ? window.innerHeight : 800) - rect.bottom;
+      const spaceAbove = rect.top;
+      const estimatedHeight = Math.min(260, Math.max(36, options.length * 30 + 8));
+      const dropUp = spaceBelow < estimatedHeight && spaceAbove > spaceBelow;
+
+      if (dropUp) {
+        menu.style.bottom = ((typeof window !== "undefined" ? window.innerHeight : 800) - rect.top + 4) + "px";
+        menu.style.top = "auto";
+        menu.classList.add("sm-customSelectMenu-dropUp");
+      } else {
+        menu.style.top = (rect.bottom + 4) + "px";
+        menu.style.bottom = "auto";
+      }
+
+      const selectWidth = rect.width;
+      if (selectWidth > 0) {
+        menu.style.width = selectWidth + "px";
+        menu.style.minWidth = selectWidth + "px";
+        menu.style.maxWidth = selectWidth + "px";
+        menu.style.boxSizing = "border-box";
+      } else {
+        menu.style.minWidth = "120px";
+      }
+      const spaceRight = (typeof window !== "undefined" ? window.innerWidth : 1200) - rect.left;
+      if (spaceRight < 220 && rect.right > 220) {
+        menu.style.right = ((typeof window !== "undefined" ? window.innerWidth : 1200) - rect.right) + "px";
+        menu.style.left = "auto";
+      } else {
+        menu.style.left = rect.left + "px";
+        menu.style.right = "auto";
+      }
+
+      const selectedEl = typeof menu.querySelector === "function" ? menu.querySelector(".sm-customSelectOptionSelected") : null;
+      if (selectedEl && typeof selectedEl.scrollIntoView === "function") {
+        selectedEl.scrollIntoView({ block: "nearest" });
+      }
+    }
+
+    function getTargetSmSelect(target) {
+      if (!target || typeof target.closest !== "function") return null;
+      const direct = target.closest(SM_SELECT_SELECTOR);
+      if (direct && direct.tagName === "SELECT") return direct;
+      const container = target.closest(".sm-wsSortField, .sm-annotationPriority, .sm-viewField, .sm-moveSection, .sm-settingsRow, .sm-customSelectWrapper");
+      if (container) {
+        const sel = container.querySelector("select");
+        if (sel && sel.tagName === "SELECT") return sel;
+      }
+      return null;
+    }
+
+    function installCustomDropdownInterceptor() {
+      if (typeof document === "undefined" || typeof document.addEventListener !== "function") {
+        return () => {};
+      }
+
+      if (typeof window !== "undefined" && typeof window.__dshSmDropdownInterceptorOff === "function") {
+        try { window.__dshSmDropdownInterceptorOff(); } catch (_) {}
+      }
+
+      const onMouseDown = (e) => {
+        if (activeCustomMenu && activeCustomMenu.contains(e.target)) return;
+        if (e.target?.closest?.("button, input, textarea, a")) return;
+
+        const select = getTargetSmSelect(e.target);
+        if (select) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (select.disabled) return;
+          try { select.focus(); } catch (_) {}
+          openCustomSelect(select);
+          return;
+        }
+
+        if (activeCustomMenu) {
+          closeCustomSelect();
+        }
+      };
+
+      const onClick = (e) => {
+        if (e.target?.closest?.("button, input, textarea, a")) return;
+        const select = getTargetSmSelect(e.target);
+        if (select) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      };
+
+      const onKeyDown = (e) => {
+        if (e.key === "Escape") {
+          if (activeCustomMenu) {
+            e.preventDefault();
+            e.stopPropagation();
+            closeCustomSelect();
+          }
+          return;
+        }
+
+        const focused = document.activeElement;
+        const targetSelect = activeCustomSelect || getTargetSmSelect(focused);
+        if (!targetSelect || targetSelect.tagName !== "SELECT") return;
+
+        if (e.key === "Enter" || e.key === " ") {
+          if (!activeCustomMenu) {
+            e.preventDefault();
+            e.stopPropagation();
+            openCustomSelect(targetSelect);
+          } else {
+            e.preventDefault();
+            e.stopPropagation();
+            closeCustomSelect();
+          }
+        } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          e.stopPropagation();
+          const opts = Array.from(targetSelect.options || []).filter(o => !o.disabled);
+          if (opts.length === 0) return;
+          const currentIdx = opts.findIndex(o => o.value === targetSelect.value);
+          const step = e.key === "ArrowDown" ? 1 : -1;
+          const nextIdx = (currentIdx + step + opts.length) % opts.length;
+          applyCustomSelection(targetSelect, opts[nextIdx].value);
+          openCustomSelect(targetSelect);
+        }
+      };
+
+      const onResizeOrScroll = (e) => {
+        // Ignore scrolls that originate inside the open menu: the listener is bound on
+        // window with capture=true, so scrolling the menu's own option list (wheel or
+        // scrollbar drag) would otherwise close it immediately.
+        // Reference: PR #37
+        if (activeCustomMenu && e && e.type === "scroll" && e.target && typeof activeCustomMenu.contains === "function" && activeCustomMenu.contains(e.target)) {
+          return;
+        }
+        if (activeCustomMenu) closeCustomSelect();
+      };
+
+      document.addEventListener("mousedown", onMouseDown, true);
+      document.addEventListener("click", onClick, true);
+      document.addEventListener("keydown", onKeyDown, true);
+      if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+        window.addEventListener("resize", onResizeOrScroll, { passive: true });
+        window.addEventListener("scroll", onResizeOrScroll, { passive: true, capture: true });
+      }
+
+      const dispose = function dispose() {
+        closeCustomSelect();
+        document.removeEventListener("mousedown", onMouseDown, true);
+        document.removeEventListener("click", onClick, true);
+        document.removeEventListener("keydown", onKeyDown, true);
+        if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+          window.removeEventListener("resize", onResizeOrScroll);
+          window.removeEventListener("scroll", onResizeOrScroll, true);
+        }
+        if (typeof window !== "undefined" && window.__dshSmDropdownInterceptorOff === dispose) {
+          window.__dshSmDropdownInterceptorOff = null;
+        }
+      };
+      if (typeof window !== "undefined") {
+        window.__dshSmDropdownInterceptorOff = dispose;
+      }
+      return dispose;
+    }
+
+    async function executeArchiveWorkspace(workspaceId, { allWorkspaces, t } = {}) {
+      if (workspaceArchiveStore.isBusy(workspaceId)) return false;
+      const raw = workspaceArchiveStore.rawSnapshot();
+      const rawItems = Array.isArray(raw?.items) ? raw.items : [];
+      const rawItem = rawItems.find(w => (w.workspaceId || w.id) === workspaceId);
+      const ws = (Array.isArray(allWorkspaces) ? allWorkspaces.find(w => w.id === workspaceId) : null) || rawItem;
+      if (!ws) return false;
+
+      const hostArchivedSet = new Set(Array.isArray(raw?.archivedSessionIds) ? raw.archivedSessionIds : []);
+      const allSessionIds = Array.isArray(ws.sessionIds) ? ws.sessionIds : [];
+      const toArchive = allSessionIds.filter(id => !hostArchivedSet.has(id));
+
+      workspaceArchiveStore.markBusy(workspaceId, true);
+      const succeeded = [];
+      let failureError = null;
+
+      try {
+        for (const sid of toArchive) {
+          try {
+            await runArchiveCommand("archive", sid, { stopActivity: false });
+            succeeded.push(sid);
+          } catch (err) {
+            failureError = err;
+            break;
+          }
+        }
+
+        if (failureError) {
+          // Rollback: unarchive whatever we archived in this run
+          for (const sid of succeeded) {
+            try { await runArchiveCommand("unarchive", sid); } catch (_) {}
+          }
+          const msg = failureError?.message || String(failureError);
+          const alertMsg = (t ? t("workspace.archive.failed", { message: msg }) : "归档工作区失败：{message}").replace("{message}", msg);
+          if (typeof window !== "undefined" && typeof window.alert === "function") {
+            window.alert(alertMsg);
+          }
+          return false;
+        }
+
+        const prevRecord = workspaceArchiveStore.getRecord(workspaceId);
+        const combinedSessionIds = Array.from(new Set([...(prevRecord?.sessionIds || []), ...succeeded]));
+        const record = {
+          workspaceId,
+          archived: true,
+          archivedAt: Date.now(),
+          sessionIds: combinedSessionIds,
+          pending: []
+        };
+        workspaceArchiveStore.saveArchiveRecord(workspaceId, record);
+        try {
+          await callApi("/workspace-archive", record);
+        } catch (e) {
+          console.warn("[session-manager] Failed to persist workspace archive to host:", e);
+        }
+
+        const currentId = activeClientCtx?.sessions?.list?.getSnapshot?.()?.current
+          || activeClientCtx?.uiWorkspace?.mainReference?.sessionId;
+        if (currentId && toArchive.includes(currentId)) {
+          try {
+            activeClientCtx?.uiWorkspace?.clearMain?.();
+          } catch (_) {}
+        }
+
+        try { await activeClientCtx?.sessions?.refresh?.(); } catch (_) {}
+        try { await activeClientCtx?.workspaces?.refresh?.(); } catch (_) {}
+        return true;
+      } finally {
+        workspaceArchiveStore.markBusy(workspaceId, false);
+      }
+    }
+
+    async function executeUnarchiveWorkspace(workspaceId, { t } = {}) {
+      if (workspaceArchiveStore.isBusy(workspaceId)) return false;
+      const record = workspaceArchiveStore.getRecord(workspaceId);
+      workspaceArchiveStore.markBusy(workspaceId, true);
+      try {
+        const raw = workspaceArchiveStore.rawSnapshot();
+        const hostArchivedSet = new Set(Array.isArray(raw?.archivedSessionIds) ? raw.archivedSessionIds : []);
+        const idsToRestore = [...(record?.sessionIds || []), ...(record?.pending || [])];
+        const failed = [];
+
+        for (const sid of idsToRestore) {
+          if (!hostArchivedSet.has(sid)) continue;
+          try {
+            await runArchiveCommand("unarchive", sid);
+          } catch (err) {
+            failed.push(sid);
+          }
+        }
+
+        if (failed.length > 0) {
+          const updatedRecord = {
+            ...(record || { workspaceId }),
+            archived: true,
+            pending: failed
+          };
+          workspaceArchiveStore.saveArchiveRecord(workspaceId, updatedRecord);
+          try {
+            await callApi("/workspace-archive", updatedRecord);
+          } catch (_) {}
+          const msg = (t ? t("workspace.unarchive.failed", { message: failed.length + " 个会话恢复失败" }) : "恢复工作区失败：{message}").replace("{message}", failed.length + " 个会话恢复失败");
+          if (typeof window !== "undefined" && typeof window.alert === "function") {
+            window.alert(msg);
+          }
+          return false;
+        }
+
+        workspaceArchiveStore.removeArchiveRecord(workspaceId);
+        try {
+          await callApi("/workspace-unarchive", { workspaceId });
+        } catch (_) {}
+
+        try { await activeClientCtx?.sessions?.refresh?.(); } catch (_) {}
+        try { await activeClientCtx?.workspaces?.refresh?.(); } catch (_) {}
+        return true;
+      } finally {
+        workspaceArchiveStore.markBusy(workspaceId, false);
+      }
+    }
+
+    function SmSwitch(props) {
+      const checked = props.checked === true;
+      const disabled = props.disabled === true;
+      const loading = props.loading === true;
+      const onChange = typeof props.onChange === "function" ? props.onChange : () => {};
+      return h("button", {
+        type: "button",
+        role: "switch",
+        className: "sm-switch" + (checked ? " sm-switchChecked" : "") + (loading ? " sm-switchLoading" : ""),
+        "aria-checked": checked,
+        "aria-label": props.ariaLabel,
+        disabled: disabled || loading,
+        onClick: (e) => {
+          if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+          if (disabled || loading) return;
+          if (typeof props.onClick === "function") props.onClick(e);
+          else onChange(!checked);
+        }
+      },
+        h("span", { className: "sm-switchThumb" },
+          loading ? h("span", { className: "sm-switchSpinner" }) : null
+        )
+      );
+    }
+
+    const EMPTY_ANNOTATION = Object.freeze({ favorite: false, reviewLater: false, tags: Object.freeze([]), note: "", priority: 3, revision: 0 });
+    const validAnnotation = value => value && typeof value.favorite === "boolean" && typeof value.reviewLater === "boolean" && Array.isArray(value.tags) && value.tags.every(tag => typeof tag === "string") && typeof value.note === "string" && (value.priority === null || Number.isInteger(value.priority) && value.priority >= 1 && value.priority <= 5) && Number.isSafeInteger(value.revision) && value.revision >= 0;
+    const annotationOf = (state, id) => Object.hasOwn(state.entries, id) ? state.entries[id] : EMPTY_ANNOTATION;
+    const annotationStore = (() => {
+      let state = { entries: {}, loaded: false, loading: false, error: null, pending: new Set() };
+      const listeners = new Set();
+      let tail = Promise.resolve(); let loading; let refreshAgain = false;
+      const publish = patch => { state = { ...state, ...patch }; for (const listener of [...listeners]) listener(); };
+      const enqueue = operation => { const result = tail.then(operation); tail = result.catch(() => {}); return result; };
+      const apiError = data => Object.assign(new Error(data?.error || "Annotation request failed"), { code: data?.code });
+      const store = {
+        notify: null,
+        getSnapshot: () => state,
+        subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+        hasSubscribers: () => listeners.size > 0,
+        load(force = false) {
+          if (loading) { if (force) refreshAgain = true; return loading; }
+          if (state.loaded && !force) return Promise.resolve();
+          publish({ loading: true, error: null });
+          loading = enqueue(async () => {
+            const data = await fetchApi("/annotations", { cache: "no-store" });
+            if (!data?.ok) throw apiError(data);
+            const entries = data.result?.annotations;
+            if (!entries || typeof entries !== "object" || Array.isArray(entries)
+              || Object.values(entries).some(value => !validAnnotation(value))) throw new Error("Invalid annotation response");
+            publish({ entries, loaded: true, error: null });
+          }).catch(error => { publish({ error: error instanceof Error ? error.message : String(error) }); })
+            .finally(() => { loading = null; publish({ loading: false }); if (refreshAgain) { refreshAgain = false; void store.load(true); } });
+          return loading;
+        },
+        save(id, patch, expectedRevision) {
+          if (state.pending.has(id)) return Promise.reject(new Error("This session's annotations are being saved"));
+          if (!state.loaded || state.error) return Promise.reject(new Error(state.error || "Annotations have not loaded yet"));
+          publish({ pending: new Set([...state.pending, id]) });
+          return enqueue(async () => {
+            const data = await callApi("/annotations", { sessionId: id, patch, ...(expectedRevision !== undefined ? { expectedRevision } : {}) });
+            if (!data?.ok) throw apiError(data);
+            const annotation = data.result?.annotation;
+            if (!validAnnotation(annotation)) throw new Error("Invalid annotation response");
+            publish({ entries: { ...state.entries, [id]: annotation } });
+            try { store.notify?.(); } catch (_) { /* cross-tab sync is best-effort */ }
+            return annotation;
+          }).finally(() => { const pending = new Set(state.pending); pending.delete(id); publish({ pending }); });
+        }
+      };
+      return store;
+    })();
+    const useAnnotations = (refreshOnMount = false) => {
+      const state = useSyncExternalStore(annotationStore.subscribe, annotationStore.getSnapshot, annotationStore.getSnapshot);
+      useEffect(() => { void annotationStore.load(refreshOnMount); }, [refreshOnMount]);
+      return state;
+    };
+
+    function HeaderStarIcon(props = {}) {
+      const size = props.size || 14;
+      const filled = !!props.filled;
+      return h("svg", {
+        viewBox: "0 0 24 24",
+        width: size,
+        height: size,
+        fill: filled ? "var(--dsw-alias-state-warn-primary, #eac54f)" : "none",
+        stroke: filled ? "var(--dsw-alias-state-warn-primary, #eac54f)" : "currentColor",
+        strokeWidth: "1.5",
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        "aria-hidden": "true",
+        style: { display: "block" }
+      },
+        h("polygon", { points: "12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" })
+      );
+    }
+
+    function HeaderClockIcon(props = {}) {
+      const size = props.size || 14;
+      return h("svg", {
+        viewBox: "0 0 24 24",
+        width: size,
+        height: size,
+        fill: "none",
+        stroke: "currentColor",
+        strokeWidth: "1.5",
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        "aria-hidden": "true",
+        style: { display: "block" }
+      },
+        h("circle", { cx: 12, cy: 12, r: 9 }),
+        h("polyline", { points: "12 7 12 12 15 14" })
+      );
+    }
+
+    function HeaderTagIcon(props = {}) {
+      const size = props.size || 14;
+      return h("svg", {
+        viewBox: "0 0 24 24",
+        width: size,
+        height: size,
+        fill: "none",
+        stroke: "currentColor",
+        strokeWidth: "1.5",
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        "aria-hidden": "true",
+        style: { display: "block" }
+      },
+        h("path", { d: "M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" }),
+        h("line", { x1: 7, y1: 7, x2: 7.01, y2: 7 })
+      );
+    }
+
+    function HeaderArchiveIcon(props = {}) {
+      const size = props.size || 14;
+      const isUnarchive = !!props.unarchive;
+      return h("svg", {
+        viewBox: "0 0 24 24",
+        width: size,
+        height: size,
+        fill: "none",
+        stroke: "currentColor",
+        strokeWidth: "1.5",
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        "aria-hidden": "true",
+        style: { display: "block" }
+      },
+        h("polyline", { points: "21 8 21 21 3 21 3 8" }),
+        h("rect", { x: 1, y: 3, width: 22, height: 5, rx: 1 }),
+        isUnarchive
+          ? h(React.Fragment, null,
+              h("polyline", { points: "10 12 12 10 14 12" }),
+              h("line", { x1: 12, y1: 10, x2: 12, y2: 16 })
+            )
+          : h(React.Fragment, null,
+              h("polyline", { points: "10 14 12 16 14 14" }),
+              h("line", { x1: 12, y1: 16, x2: 12, y2: 10 })
+            )
+      );
+    }
+
+    function HeaderMoveIcon(props = {}) {
+      const size = props.size || 14;
+      return h("svg", {
+        viewBox: "0 0 24 24",
+        width: size,
+        height: size,
+        fill: "none",
+        stroke: "currentColor",
+        strokeWidth: "1.5",
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        "aria-hidden": "true",
+        style: { display: "block" }
+      },
+        h("polyline", { points: "17 4 21 8 17 12" }),
+        h("line", { x1: 3, y1: 8, x2: 21, y2: 8 }),
+        h("polyline", { points: "7 20 3 16 7 12" }),
+        h("line", { x1: 21, y1: 16, x2: 3, y2: 16 })
+      );
+    }
+
+    function HeaderTrashIcon(props = {}) {
+      const size = props.size || 14;
+      return h("svg", {
+        viewBox: "0 0 24 24",
+        width: size,
+        height: size,
+        fill: "none",
+        stroke: "currentColor",
+        strokeWidth: "1.5",
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        "aria-hidden": "true",
+        style: { display: "block" }
+      },
+        h("polyline", { points: "3 6 5 6 21 6" }),
+        h("path", { d: "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" })
+      );
+    }
+
+    function HeaderEllipsisIcon(props = {}) {
+      const size = props.size || 14;
+      return h("svg", {
+        viewBox: "0 0 24 24",
+        width: size,
+        height: size,
+        fill: "currentColor",
+        stroke: "none",
+        "aria-hidden": "true",
+        style: { display: "block" }
+      },
+        h("circle", { cx: 12, cy: 12, r: 2 }),
+        h("circle", { cx: 19, cy: 12, r: 2 }),
+        h("circle", { cx: 5, cy: 12, r: 2 })
+      );
+    }
+
+    const annotationButtons = (id, title, t, state, className, onToggle, onEdit, disabled = false, editorOpen = false) => {
+      const value = annotationOf(state, id);
+      const busy = disabled || !state.loaded || !!state.error || state.pending.has(id);
+      const favoriteDesc = t(value.favorite ? "marks.favorite.remove" : "marks.favorite.add");
+      const reviewDesc = t(value.reviewLater ? "marks.review.remove" : "marks.review.add");
+      const favoriteLabel = favoriteDesc + ": " + title;
+      const reviewLabel = reviewDesc + ": " + title;
+      const isHeader = className === "sm-headerBtn";
+      const priorityInfo = value.priority ? ` (P${value.priority})` : "";
+      return h(React.Fragment, null,
+        renderTip(favoriteDesc, h("button", { type: "button", className: className + " sm-markIcon" + (value.favorite ? " sm-markOn" : ""), disabled: busy, "aria-label": favoriteLabel, "aria-pressed": value.favorite, onClick: () => onToggle({ favorite: !value.favorite }) },
+          h("span", { className: "sm-headerBtnIcon" }, HeaderStarIcon({ filled: value.favorite }))
+        )),
+        renderTip(reviewDesc, h("button", { type: "button", className: className + " sm-markIcon" + (value.reviewLater ? " sm-markOn" : ""), disabled: busy, "aria-label": reviewLabel, "aria-pressed": value.reviewLater, onClick: () => onToggle({ reviewLater: !value.reviewLater }) },
+          h("span", { className: "sm-headerBtnIcon" }, HeaderClockIcon())
+        )),
+        renderTip(t("marks.edit.aria") + priorityInfo, h("button", {
+          type: "button",
+          className: className + (isHeader ? " sm-headerSecondaryAction" : " sm-rowBtnIcon") + (editorOpen ? " sm-annotationToggleOpen sm-headerBtnActive sm-rowBtnActive" : ""),
+          disabled: busy,
+          "aria-label": t("marks.edit.aria") + ": " + title,
+          ...(isHeader ? { "aria-expanded": editorOpen } : {}),
+          onClick: e => onEdit(e)
+        },
+          h("span", { className: "sm-headerBtnIcon" }, HeaderTagIcon()),
+          h("span", { className: isHeader ? "sm-headerBtnLabel" : "sm-rowBtnLabel" }, isHeader ? t("marks.header.edit") : t("marks.edit")),
+          isHeader ? h("span", { className: "sm-priorityBadge sm-priority-" + (value.priority ?? 3) }, "P" + (value.priority ?? 3)) : null
+        ))
+      );
+    };
+
+
+    // Inline clipboard parser mirroring lib/clipboard-parser.js. The server
+    // re-validates the patch via annotationStore.save, so this helper only
+    // needs to be permissive enough to surface obvious mistakes early.
+    const TAG_LIMITS = { tags: 20, tagLength: 32, noteLength: 2000 };
+    const TAG_REJECT_RE = /[,，\x00-\x1f]/;
+    // Recover the most useful JSON object from a possibly noisy
+    // clipboard string. Tries, in order:
+    //   1. JSON.parse on the trimmed text.
+    //   2. JSON.parse inside a Markdown \`\`\`json ... \`\`\` fence.
+    //   3. JSON.parse on the first balanced {...} the scanner finds.
+    //   4. JSON.parse after repairing common AI mistakes
+    //      (smart quotes, full-width punctuation, stray backslashes,
+    //       trailing commas).
+    // Every failing attempt appends the underlying error so the user can
+    // see what actually went wrong.
+    const parseImportedAnnotation = raw => {
+      if (typeof raw !== "string" || raw.trim() === "") return { ok: false, error: "剪贴板为空 / Clipboard is empty" };
+      let work = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
+      work = work.replace(/^\s+|\s+$/g, "");
+      const fence = work.match(/^```(?:json|JSON)?\s*([\s\S]*?)\s*```$/);
+      const scanForObject = text => {
+        const len = text.length;
+        for (let i = 0; i < len; i++) {
+          if (text[i] !== "{") continue;
+          let depth = 0, inString = false, escape = false;
+          for (let j = i; j < len; j++) {
+            const c = text[j];
+            if (inString) {
+              if (escape) escape = false;
+              else if (c === String.fromCharCode(92)) escape = true;
+              else if (c === String.fromCharCode(34)) inString = false;
+              continue;
+            }
+            if (c === String.fromCharCode(34)) inString = true;
+            else if (c === "{") depth++;
+            else if (c === "}") { depth--; if (depth === 0) return text.slice(i, j + 1); }
+          }
+        }
+        return null;
+      };
+      const repairLooseJson = text => text
+        // Smart quotes from Chinese / English typography.
+        .replace(/[“”]/g, "\"")
+        .replace(/[‘’]/g, "'")
+        // Stray single backslashes that aren't part of a valid JSON escape.
+        // Walk the string char-by-char to avoid touching \", \, \/, \n etc.
+        .replace(/\\(?![\\"/bfnrtu])/g, "\\\\");
+      const attempts = [];
+      const tryParse = (label, value) => {
+        try { return JSON.parse(value); }
+        catch (error) { attempts.push(label + ": " + error.message); return null; }
+      };
+      let parsed;
+      const primary = fence ? fence[1] : work;
+      parsed = tryParse("原始", primary) || tryParse("修复引号/反斜杠", repairLooseJson(primary));
+      if (parsed === null) {
+        const scanned = scanForObject(work);
+        if (scanned !== null) {
+          parsed = tryParse("扫描对象", scanned) || tryParse("扫描对象+修复", repairLooseJson(scanned));
+        }
+      }
+      if (parsed === null) {
+        return { ok: false, error: "剪贴板中的 JSON 无法解析 — " + attempts.join("；") };
+      }
+      if (typeof parsed !== "object" || Array.isArray(parsed)) {
+        return { ok: false, error: "剪贴板内容不是 JSON 对象" };
+      }
+      const allowed = new Set(["tags", "note", "priority"]);
+      const warnings = [];
+      for (const key of Object.keys(parsed)) if (!allowed.has(key)) warnings.push({ field: key, kind: "ignored" });
+      let tags = [];
+      if ("tags" in parsed) {
+        if (!Array.isArray(parsed.tags)) return { ok: false, error: "tags must be an array of strings" };
+        const seen = new Set();
+        for (const item of parsed.tags) {
+          if (typeof item !== "string") { warnings.push({ field: "tags", kind: "rejected" }); continue; }
+          const tag = item.trim();
+          if (!tag) continue;
+          if (tag.length > TAG_LIMITS.tagLength || TAG_REJECT_RE.test(tag)) {
+            warnings.push({ field: "tags", kind: "rejected", value: tag });
+            continue;
+          }
+          const key = tag.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          if (tags.length >= TAG_LIMITS.tags) { warnings.push({ field: "tags", kind: "truncated" }); continue; }
+          tags.push(tag);
+        }
+      }
+      let note = "";
+      if ("note" in parsed) {
+        if (typeof parsed.note !== "string") return { ok: false, error: "note must be a string" };
+        if (parsed.note.includes(String.fromCharCode(0))) return { ok: false, error: "note must not contain NUL characters" };
+        if (parsed.note.length > TAG_LIMITS.noteLength) {
+          warnings.push({ field: "note", kind: "truncated", from: parsed.note.length, to: TAG_LIMITS.noteLength });
+          note = parsed.note.slice(0, TAG_LIMITS.noteLength);
+        } else note = parsed.note;
+      }
+      let priority;
+      if ("priority" in parsed) {
+        // AI-returned null is treated as the default priority (3 = Normal) so
+        // the UI never has to special-case unset entries.
+        if (parsed.priority === null) priority = 3;
+        else if (Number.isInteger(parsed.priority) && parsed.priority >= 1 && parsed.priority <= 5) priority = parsed.priority;
+        else warnings.push({ field: "priority", kind: "rejected", value: parsed.priority });
+      }
+      const annotation = { tags, note };
+      if (priority !== undefined) annotation.priority = priority;
+      return { ok: true, annotation, warnings };
+    };
+    const CLIPBOARD_PROMPT_TEXT = {
+      zh: [
+        "请根据当前对话内容，为这个会话生成整理标记。",
+        "",
+        "要求：",
+        "1. 生成最多 20 个标签，每个标签最多 32 个字符。",
+        "2. 标签应简洁、具体，便于之后搜索。",
+        "3. 标签不要重复，不要生成无意义的标签。",
+        "4. 生成一段不超过 2000 个字符的备注，总结本次对话的主题、结论、未完成事项或下一步行动。",
+        "5. 不要编造对话中没有出现的信息。",
+        "6. 只返回合法 JSON，不要使用 Markdown 代码块，不要附加解释。",
+        "",
+        "返回格式：",
+        "{",
+        '  "tags": ["标签1", "标签2"],',
+        '  "note": "会话备注"',
+        "}"
+      ].join(String.fromCharCode(10)),
+      en: [
+        "Summarize this conversation into session annotations.",
+        "",
+        "Requirements:",
+        "1. Up to 20 tags, at most 32 characters each.",
+        "2. Tags should be concise and help future searches.",
+        "3. Do not repeat tags or invent meaningless ones.",
+        "4. Write a note under 2000 characters summarizing the topic, conclusions, outstanding items and next steps.",
+        "5. Do not fabricate details that are not present in the conversation.",
+        "6. Return only valid JSON, no Markdown fences, no extra commentary.",
+        "",
+        "Return shape:",
+        "{",
+        '  "tags": ["tag1", "tag2"],',
+        '  "note": "session note"',
+        "}"
+      ].join(String.fromCharCode(10))
+    };
+    const promptFor = lang => CLIPBOARD_PROMPT_TEXT[lang] || CLIPBOARD_PROMPT_TEXT.zh;
+    function isClickInsideDialog(e, dialogRef, layerRef) {
+      if (!e || !e.target) return false;
+      const target = e.target;
+      if (dialogRef && dialogRef.current && typeof dialogRef.current.contains === "function" && dialogRef.current.contains(target)) {
+        return true;
+      }
+      if (layerRef && layerRef.current && typeof layerRef.current.contains === "function" && layerRef.current.contains(target)) {
+        return true;
+      }
+      if (typeof target.closest === "function") {
+        if (dialogRef && dialogRef.current && target.closest(".sm-nativeDialog") === dialogRef.current) {
+          return true;
+        }
+        if (layerRef && layerRef.current && target.closest(".sm-nativeDialogLayer") === layerRef.current) {
+          return true;
+        }
+      }
+      if (activeCustomMenu && typeof activeCustomMenu.contains === "function" && activeCustomMenu.contains(target)) {
+        if (activeCustomSelect) {
+          if (dialogRef && dialogRef.current && typeof dialogRef.current.contains === "function" && dialogRef.current.contains(activeCustomSelect)) {
+            return true;
+          }
+          if (layerRef && layerRef.current && typeof layerRef.current.contains === "function" && layerRef.current.contains(activeCustomSelect)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    function BatchPreviewDialog(props) {
+      const t = typeof props.t === "function" ? props.t : (key) => key;
+      const open = props.open === true;
+      const onCancel = typeof props.onCancel === "function" ? props.onCancel : () => {};
+      const onExecute = typeof props.onExecute === "function" ? props.onExecute : () => {};
+      const danger = props.danger === true;
+      const actionLabel = props.actionLabel || "";
+      const summaryAction = props.summaryAction || actionLabel;
+      const title = props.title || (props.action === "delete" ? (props.t ? t("confirm.delete.title") : "删除会话") : t("bulk.dialog.title", { action: actionLabel }));
+      const sessions = Array.isArray(props.sessions) ? props.sessions : [];
+      const warning = typeof props.warning === "string" ? props.warning : "";
+      const confirmLabel = props.confirmLabel || t("bulk.dialog.execute");
+      const cancelLabel = props.cancelLabel || t("bulk.dialog.cancel");
+      const dialogRef = useRef(null);
+      const layerRef = useRef(null);
+      const [expanded, setExpanded] = useState(false);
+      const [zIndex] = useState(() => open ? nextDialogZ() : 0);
+      const floatingCoords = useFloatingPosition(props.anchor, open, { placement: "bottom-end", dialogWidth: 360, dialogHeight: 320 });
+      const escStateRef = useRef({});
+      escStateRef.current = { onCancel };
+      useEffect(() => {
+        if (!open) return;
+        registerDialogZ(zIndex);
+        const handler = (e) => {
+          if (e.key !== "Escape" || e.defaultPrevented) return;
+          if (!isTopmostDialog(zIndex)) return;
+          if (props.busy) return;
+          e.preventDefault(); e.stopPropagation(); escStateRef.current.onCancel();
+        };
+        window.addEventListener("keydown", handler);
+        const mountTime = Date.now();
+        const clickHandler = (e) => {
+          if (Date.now() - mountTime < 50) return;
+          if (e.defaultPrevented) return;
+          if (props.busy) return;
+          if (!isTopmostDialog(zIndex)) return;
+          if (isClickInsideDialog(e, dialogRef, layerRef)) return;
+          if (e && typeof e.preventDefault === "function") e.preventDefault();
+          if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+          if (e && typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+          escStateRef.current.onCancel();
+        };
+        window.addEventListener("click", clickHandler, true);
+        return () => {
+          unregisterDialogZ(zIndex);
+          window.removeEventListener("keydown", handler);
+          window.removeEventListener("click", clickHandler, true);
+        };
+      }, [open, zIndex]);
+      if (!open) return null;
+      const loading = props.loading === true;
+      const hasError = Boolean(props.error);
+      const confirmDisabled = loading || hasError;
+      const showExpand = sessions.length > 12;
+      const visible = expanded ? sessions : sessions.slice(0, 12);
+      const topPx = floatingCoords ? floatingCoords.top : null;
+      const leftPx = floatingCoords ? floatingCoords.left : null;
+      const isCentered = Boolean(floatingCoords && floatingCoords.centered);
+      const hasCoords = topPx !== null && leftPx !== null;
+      const layerStyle = {
+        zIndex: zIndex || undefined,
+        ...(hasCoords
+          ? {
+              position: "fixed",
+              top: topPx + "px",
+              left: leftPx + "px",
+              right: "auto",
+              bottom: "auto",
+              inset: `${topPx}px auto auto ${leftPx}px`,
+              ...(isCentered ? { transform: "translate(-50%, -50%)" } : {})
+            }
+          : {})
+      };
+      const portalOverlay = renderInOverlay;
+      return portalOverlay(h("div", { ref: layerRef, className: "sm-nativeDialogLayer sm-bulkDialog" + (hasCoords ? " sm-bulkDialog-anchored" : ""), role: "presentation", style: layerStyle },
+        h("section", { ref: dialogRef, className: "sm-nativeDialog", style: { pointerEvents: "auto" }, role: "dialog", "aria-modal": "true", "aria-labelledby": "sm-batch-preview-title" },
+          h("div", { className: "sm-nativeDialogHeader" }, h("h2", { id: "sm-batch-preview-title", className: "sm-nativeDialogTitle" }, title)),
+          h("div", { className: "sm-nativeDialogBody" },
+            h("div", { className: "sm-bulkDialogSummary" }, t("bulk.dialog.summary", { count: sessions.length, action: actionLabel })),
+            warning ? h("div", { className: "sm-bulkDialogWarn" }, warning) : null,
+            h("div", { className: "sm-bulkSessionList" },
+              visible.map((s, i) => h("div", { key: (s.id || i) + "-" + i, className: "sm-bulkSessionItem", title: s.id || "" }, s.displayTitle || s.id || "—"))
+            ),
+            showExpand ? h("button", { type: "button", className: "sm-resetFilters", onClick: () => setExpanded(value => !value) }, expanded ? t("panel.reset") : "…（+" + (sessions.length - 12) + "）") : null
+          ),
+          h("div", { className: "sm-nativeDialogFooter" },
+            h("button", { type: "button", className: "sm-nativeDialogButton sm-nativeDialogCancel", onClick: onCancel }, cancelLabel),
+            h("button", {
+              type: "button",
+              className: "sm-nativeDialogButton" + (danger ? " sm-nativeDialogDanger" : " sm-nativeDialogConfirm"),
+              disabled: props.busy || confirmDisabled,
+              onClick: () => { if (!props.busy && !confirmDisabled) onExecute(); }
+            }, confirmLabel)
+          )
+        )
+      ));
+    }
+
+    function BatchProgressDialog(props) {
+      const t = typeof props.t === "function" ? props.t : (key) => key;
+      const open = props.open === true;
+      const [zIndex] = useState(() => open ? nextDialogZ() : 0);
+      useEffect(() => {
+        if (!open) return;
+        registerDialogZ(zIndex);
+        return () => unregisterDialogZ(zIndex);
+      }, [open, zIndex]);
+      const actionLabel = props.actionLabel || "";
+      const done = Number.isInteger(props.done) ? props.done : 0;
+      const total = Number.isInteger(props.total) ? props.total : 0;
+      const completed = props.completed === true;
+      const onCancel = typeof props.onCancel === "function" ? props.onCancel : () => {};
+      const cancelLabel = props.cancelLabel || t("bulk.progress.cancel");
+      const floatingCoords = useFloatingPosition(props.anchor, open, { placement: "bottom-end", dialogWidth: 360, dialogHeight: 180 });
+      if (!open) return null;
+      const pct = total > 0 ? Math.max(0, Math.min(100, Math.round((done / total) * 100))) : 0;
+      const topPx = floatingCoords ? floatingCoords.top : null;
+      const leftPx = floatingCoords ? floatingCoords.left : null;
+      const isCentered = Boolean(floatingCoords && floatingCoords.centered);
+      const hasCoords = topPx !== null && leftPx !== null;
+      const layerStyle = {
+        zIndex: zIndex || undefined,
+        ...(hasCoords
+          ? {
+              position: "fixed",
+              top: topPx + "px",
+              left: leftPx + "px",
+              right: "auto",
+              bottom: "auto",
+              inset: `${topPx}px auto auto ${leftPx}px`,
+              ...(isCentered ? { transform: "translate(-50%, -50%)" } : {})
+            }
+          : {})
+      };
+      const portalOverlay = renderInOverlay;
+      return portalOverlay(h("div", { className: "sm-nativeDialogLayer sm-bulkDialog" + (hasCoords ? " sm-bulkDialog-anchored" : ""), role: "presentation", style: layerStyle },
+        h("section", { className: "sm-nativeDialog", style: { pointerEvents: "auto" }, role: "dialog", "aria-modal": "true", "aria-labelledby": "sm-batch-progress-title" },
+          h("div", { className: "sm-nativeDialogHeader" }, h("h2", { id: "sm-batch-progress-title", className: "sm-nativeDialogTitle" }, t("bulk.progress.title", { action: actionLabel }))),
+          h("div", { className: "sm-nativeDialogBody" },
+            h("div", { className: "sm-bulkDialogSummary" }, completed ? t("bulk.progress.completed", { done, total }) : t("bulk.progress.current", { done, total })),
+            h("div", { className: "sm-bulkProgressBar", role: "progressbar", "aria-valuemin": 0, "aria-valuemax": total, "aria-valuenow": done },
+              h("div", { className: "sm-bulkProgressFill", style: { width: pct + "%" } })
+            )
+          ),
+          h("div", { className: "sm-nativeDialogFooter" },
+            h("button", { type: "button", className: "sm-nativeDialogButton sm-nativeDialogCancel", disabled: completed, onClick: onCancel }, cancelLabel)
+          )
+        )
+      ));
+    }
+
+    function BatchResultDialog(props) {
+      const t = typeof props.t === "function" ? props.t : (key) => key;
+      const open = props.open === true;
+      const dialogRef = useRef(null);
+      const layerRef = useRef(null);
+      const [zIndex] = useState(() => open ? nextDialogZ() : 0);
+      const actionLabel = props.actionLabel || "";
+      const items = Array.isArray(props.items) ? props.items : [];
+      const onClose = typeof props.onClose === "function" ? props.onClose : () => {};
+      const onRetry = typeof props.onRetry === "function" ? props.onRetry : () => {};
+      const closeLabel = props.closeLabel || t("bulk.result.close");
+      const retryLabel = props.retryLabel || t("bulk.result.retry");
+      const floatingCoords = useFloatingPosition(props.anchor, open, { placement: "bottom-end", dialogWidth: 360, dialogHeight: 320 });
+      const escStateRef = useRef({});
+      escStateRef.current = { onClose };
+      useEffect(() => {
+        if (!open) return;
+        registerDialogZ(zIndex);
+        const handler = (e) => {
+          if (e.key !== "Escape" || e.defaultPrevented) return;
+          if (!isTopmostDialog(zIndex)) return;
+          e.preventDefault(); e.stopPropagation(); escStateRef.current.onClose();
+        };
+        window.addEventListener("keydown", handler);
+        const mountTime = Date.now();
+        const clickHandler = (e) => {
+          if (Date.now() - mountTime < 50) return;
+          if (e.defaultPrevented) return;
+          if (!isTopmostDialog(zIndex)) return;
+          if (isClickInsideDialog(e, dialogRef, layerRef)) return;
+          if (e && typeof e.preventDefault === "function") e.preventDefault();
+          if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+          if (e && typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+          escStateRef.current.onClose();
+        };
+        window.addEventListener("click", clickHandler, true);
+        return () => {
+          unregisterDialogZ(zIndex);
+          window.removeEventListener("keydown", handler);
+          window.removeEventListener("click", clickHandler, true);
+        };
+      }, [open, zIndex]);
+      if (!open) return null;
+      const groups = { success: [], failed: [], skipped: [] };
+      for (const item of items) {
+        const status = item && item.status;
+        if (status === "success") groups.success.push(item);
+        else if (status === "skipped") groups.skipped.push(item);
+        else groups.failed.push(item);
+      }
+      const renderGroup = (labelKey, group, reasonClass) => {
+        if (group.length === 0) return null;
+        return h("div", { key: labelKey, className: "sm-bulkResultGroup" },
+          h("div", { className: "sm-bulkResultHeader" }, t(labelKey, { count: group.length })),
+          h("div", { className: "sm-bulkResultList" },
+            group.map((item, i) => h("div", { key: (item.sessionId || i) + "-" + i, className: "sm-bulkResultItem", title: item.sessionId || "" },
+              h("div", { className: "sm-bulkResultItemTitle" }, item.displayTitle || item.sessionId || "—"),
+              reasonClass && (item.reason || item.error) ? h("div", { className: reasonClass }, item.reason || item.error) : null
+            ))
+          )
+        );
+      };
+      const topPx = floatingCoords ? floatingCoords.top : null;
+      const leftPx = floatingCoords ? floatingCoords.left : null;
+      const isCentered = Boolean(floatingCoords && floatingCoords.centered);
+      const hasCoords = topPx !== null && leftPx !== null;
+      const layerStyle = {
+        zIndex: zIndex || undefined,
+        ...(hasCoords
+          ? {
+              position: "fixed",
+              top: topPx + "px",
+              left: leftPx + "px",
+              right: "auto",
+              bottom: "auto",
+              inset: `${topPx}px auto auto ${leftPx}px`,
+              ...(isCentered ? { transform: "translate(-50%, -50%)" } : {})
+            }
+          : {})
+      };
+      const portalOverlay = renderInOverlay;
+      return portalOverlay(h("div", { ref: layerRef, className: "sm-nativeDialogLayer sm-bulkDialog" + (hasCoords ? " sm-bulkDialog-anchored" : ""), role: "presentation", style: layerStyle },
+        h("section", { ref: dialogRef, className: "sm-nativeDialog", style: { pointerEvents: "auto" }, role: "dialog", "aria-modal": "true", "aria-labelledby": "sm-batch-result-title" },
+          h("div", { className: "sm-nativeDialogHeader" }, h("h2", { id: "sm-batch-result-title", className: "sm-nativeDialogTitle" }, t("bulk.result.title", { action: actionLabel }))),
+          h("div", { className: "sm-nativeDialogBody" },
+            renderGroup("bulk.result.successGroup", groups.success),
+            renderGroup("bulk.result.failedGroup", groups.failed, "sm-bulkResultItemReason"),
+            renderGroup("bulk.result.skippedGroup", groups.skipped, "sm-bulkResultItemReasonSkip")
+          ),
+          h("div", { className: "sm-nativeDialogFooter" },
+            h("button", { type: "button", className: "sm-nativeDialogButton sm-nativeDialogCancel", onClick: onClose }, closeLabel),
+            groups.failed.length > 0 ? h("button", { type: "button", className: "sm-nativeDialogButton sm-nativeDialogConfirm", onClick: () => onRetry(groups.failed.map(item => item.sessionId)) }, retryLabel) : null
+          )
+        )
+      ));
+    }
+
+    function BulkActionBar(props) {
+      const t = props.t;
+      const selectedCount = props.selectedCount || 0;
+      const filteredCount = props.filteredCount || 0;
+      const busy = props.busy === true;
+      const onAction = props.onAction;
+      const onOpenTagDialog = props.onOpenTagDialog;
+      const onOpenPriorityDialog = props.onOpenPriorityDialog;
+      const onOpenMoveDialog = props.onOpenMoveDialog;
+      const onOpenPresetDialog = props.onOpenPresetDialog;
+      const disableNonDestructive = selectedCount === 0 || busy;
+      const destructiveBusy = selectedCount === 0 || busy;
+      return h("div", { className: "sm-bulkBar", role: "toolbar", "aria-label": t("bulk.heading") },
+        h("span", { className: "sm-bulkSummary" }, t("bulk.selectedFiltered", { selected: selectedCount, filtered: filteredCount })),
+        h("button", { type: "button", className: "sm-bulkBtn", disabled: disableNonDestructive, onClick: () => onAction("archive") }, t("bulk.archive")),
+        h("button", { type: "button", className: "sm-bulkBtn", disabled: disableNonDestructive, onClick: () => onAction("unarchive") }, t("bulk.unarchive")),
+        h("button", { type: "button", className: "sm-bulkBtn", disabled: disableNonDestructive, onClick: () => onAction("favorite") }, t("bulk.favorite")),
+        h("button", { type: "button", className: "sm-bulkBtn", disabled: disableNonDestructive, onClick: () => onAction("unfavorite") }, t("bulk.unfavorite")),
+        h("button", { type: "button", className: "sm-bulkBtn", disabled: disableNonDestructive, onClick: () => onAction("review") }, t("bulk.review")),
+        h("button", { type: "button", className: "sm-bulkBtn", disabled: disableNonDestructive, onClick: () => onAction("unreview") }, t("bulk.unreview")),
+        // Row 2 of the 3x6 grid (添加标签 / 清空标签 / 设置优先级 / 移动至工作区 / 迁移预设 / 删除会话).
+        h("button", { type: "button", className: "sm-bulkBtn", disabled: disableNonDestructive, onClick: onOpenTagDialog }, t("bulk.tagsAdd")),
+        h("button", { type: "button", className: "sm-bulkBtn", disabled: disableNonDestructive, onClick: () => onAction("remove-tags", { tags: [] }) }, t("bulk.tagsRemove")),
+        h("button", { type: "button", className: "sm-bulkBtn", disabled: disableNonDestructive, onClick: onOpenPriorityDialog }, t("bulk.priority")),
+        h("button", { type: "button", className: "sm-bulkBtn", disabled: disableNonDestructive, onClick: onOpenMoveDialog }, t("bulk.moveBtn")),
+        h("button", { type: "button", className: "sm-bulkBtn", disabled: disableNonDestructive, onClick: onOpenPresetDialog }, t("bulk.presetMigrate")),
+        h("button", { type: "button", className: "sm-bulkBtn sm-bulkBtnDanger", disabled: destructiveBusy, onClick: () => onAction("delete", null, true) }, t("bulk.delete"))
+      );
+    }
+
+    function BulkTagInputDialog(props) {
+      const t = typeof props.t === "function" ? props.t : (key) => key;
+      const open = props.open === true;
+      const dialogRef = useRef(null);
+      const layerRef = useRef(null);
+      const [zIndex] = useState(() => open ? nextDialogZ() : 0);
+      const title = props.title || t("bulk.tagsAdd");
+      const description = props.description || "";
+      const placeholder = props.placeholder || t("bulk.tags.placeholder");
+      const onCancel = typeof props.onCancel === "function" ? props.onCancel : () => {};
+      const onApply = typeof props.onApply === "function" ? props.onApply : () => {};
+      const confirmLabel = props.confirmLabel || t("bulk.confirm.tagsAdd");
+      const floatingCoords = useFloatingPosition(props.anchor, open, { placement: "bottom-end", dialogWidth: 360, dialogHeight: 220 });
+      const [value, setValue] = useState("");
+      useEffect(() => { if (open) setValue(""); }, [open]);
+      const escStateRef = useRef({});
+      escStateRef.current = { onCancel };
+      useEffect(() => {
+        if (!open) return;
+        registerDialogZ(zIndex);
+        const handler = (e) => {
+          if (e.key !== "Escape" || e.defaultPrevented) return;
+          if (!isTopmostDialog(zIndex)) return;
+          e.preventDefault(); e.stopPropagation(); escStateRef.current.onCancel();
+        };
+        window.addEventListener("keydown", handler);
+        const mountTime = Date.now();
+        const clickHandler = (e) => {
+          if (Date.now() - mountTime < 50) return;
+          if (e.defaultPrevented) return;
+          if (!isTopmostDialog(zIndex)) return;
+          if (isClickInsideDialog(e, dialogRef, layerRef)) return;
+          if (e && typeof e.preventDefault === "function") e.preventDefault();
+          if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+          if (e && typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+          escStateRef.current.onCancel();
+        };
+        window.addEventListener("click", clickHandler, true);
+        return () => {
+          unregisterDialogZ(zIndex);
+          window.removeEventListener("keydown", handler);
+          window.removeEventListener("click", clickHandler, true);
+        };
+      }, [open, zIndex]);
+      if (!open) return null;
+      const submit = () => {
+        const tags = (value || "").split(/[,，\n]/).map(s => s.trim()).filter(Boolean);
+        onApply(tags);
+      };
+      const topPx = floatingCoords ? floatingCoords.top : null;
+      const leftPx = floatingCoords ? floatingCoords.left : null;
+      const isCentered = Boolean(floatingCoords && floatingCoords.centered);
+      const hasCoords = topPx !== null && leftPx !== null;
+      const layerStyle = {
+        zIndex: zIndex || undefined,
+        ...(hasCoords
+          ? {
+              position: "fixed",
+              top: topPx + "px",
+              left: leftPx + "px",
+              right: "auto",
+              bottom: "auto",
+              inset: `${topPx}px auto auto ${leftPx}px`,
+              ...(isCentered ? { transform: "translate(-50%, -50%)" } : {})
+            }
+          : {})
+      };
+      const portalOverlay = renderInOverlay;
+      return portalOverlay(h("div", { ref: layerRef, className: "sm-nativeDialogLayer sm-bulkDialog" + (hasCoords ? " sm-bulkDialog-anchored" : ""), role: "presentation", style: layerStyle },
+        h("section", { ref: dialogRef, className: "sm-nativeDialog", style: { pointerEvents: "auto" }, role: "dialog", "aria-modal": "true", "aria-labelledby": "sm-bulk-tags-title" },
+          h("div", { className: "sm-nativeDialogHeader" }, h("h2", { id: "sm-bulk-tags-title", className: "sm-nativeDialogTitle" }, title)),
+          h("div", { className: "sm-nativeDialogBody" },
+            description ? h("div", { className: "sm-bulkDialogSummary" }, description) : null,
+            h("textarea", { className: "sm-noteInput", "aria-label": placeholder, value, placeholder, rows: 3, onChange: (e) => setValue(e.target.value), autoFocus: true })
+          ),
+          h("div", { className: "sm-nativeDialogFooter" },
+            h("button", { type: "button", className: "sm-nativeDialogButton sm-nativeDialogCancel", onClick: onCancel }, t("bulk.dialog.cancel")),
+            h("button", { type: "button", className: "sm-nativeDialogButton sm-nativeDialogConfirm", onClick: submit }, confirmLabel)
+          )
+        )
+      ));
+    }
+
+    function BulkChoiceDialog(props) {
+      const t = typeof props.t === "function" ? props.t : (key) => key;
+      const open = props.open === true;
+      const dialogRef = useRef(null);
+      const layerRef = useRef(null);
+      const [zIndex] = useState(() => open ? nextDialogZ() : 0);
+      const title = props.title || "";
+      const description = props.description || "";
+      const options = Array.isArray(props.options) ? props.options : [];
+      const onCancel = typeof props.onCancel === "function" ? props.onCancel : () => {};
+      const onApply = typeof props.onApply === "function" ? props.onApply : () => {};
+      const confirmLabel = props.confirmLabel || t("bulk.dialog.execute");
+      const floatingCoords = useFloatingPosition(props.anchor, open, { placement: "bottom-end", dialogWidth: 360, dialogHeight: 220 });
+      const [value, setValue] = useState("");
+      useEffect(() => { if (open) setValue(""); }, [open]);
+      const escStateRef = useRef({});
+      escStateRef.current = { onCancel };
+      useEffect(() => {
+        if (!open) return;
+        registerDialogZ(zIndex);
+        const handler = (e) => {
+          if (e.key !== "Escape" || e.defaultPrevented) return;
+          if (!isTopmostDialog(zIndex)) return;
+          e.preventDefault(); e.stopPropagation(); escStateRef.current.onCancel();
+        };
+        window.addEventListener("keydown", handler);
+        const mountTime = Date.now();
+        const clickHandler = (e) => {
+          if (Date.now() - mountTime < 50) return;
+          if (e.defaultPrevented) return;
+          if (!isTopmostDialog(zIndex)) return;
+          if (isClickInsideDialog(e, dialogRef, layerRef)) return;
+          if (e && typeof e.preventDefault === "function") e.preventDefault();
+          if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+          if (e && typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+          escStateRef.current.onCancel();
+        };
+        window.addEventListener("click", clickHandler, true);
+        return () => {
+          unregisterDialogZ(zIndex);
+          window.removeEventListener("keydown", handler);
+          window.removeEventListener("click", clickHandler, true);
+        };
+      }, [open, zIndex]);
+      if (!open) return null;
+      const topPx = floatingCoords ? floatingCoords.top : null;
+      const leftPx = floatingCoords ? floatingCoords.left : null;
+      const isCentered = Boolean(floatingCoords && floatingCoords.centered);
+      const hasCoords = topPx !== null && leftPx !== null;
+      const layerStyle = {
+        zIndex: zIndex || undefined,
+        ...(hasCoords
+          ? {
+              position: "fixed",
+              top: topPx + "px",
+              left: leftPx + "px",
+              right: "auto",
+              bottom: "auto",
+              inset: `${topPx}px auto auto ${leftPx}px`,
+              ...(isCentered ? { transform: "translate(-50%, -50%)" } : {})
+            }
+          : {})
+      };
+      const portalOverlay = renderInOverlay;
+      return portalOverlay(h("div", { ref: layerRef, className: "sm-nativeDialogLayer sm-bulkDialog" + (hasCoords ? " sm-bulkDialog-anchored" : ""), role: "presentation", style: layerStyle },
+        h("section", { ref: dialogRef, className: "sm-nativeDialog", style: { pointerEvents: "auto" }, role: "dialog", "aria-modal": "true", "aria-labelledby": "sm-bulk-choice-title" },
+          h("div", { className: "sm-nativeDialogHeader" }, h("h2", { id: "sm-bulk-choice-title", className: "sm-nativeDialogTitle" }, title)),
+          h("div", { className: "sm-nativeDialogBody" },
+            description ? h("div", { className: "sm-bulkDialogSummary" }, description) : null,
+            options.length === 0
+              ? h("div", { className: "sm-empty" }, t("migrate.noPresets"))
+              : h("select", { className: "sm-viewSelect", value, onChange: (e) => setValue(e.target.value), "aria-label": title, autoFocus: true },
+                  h("option", { value: "" }, "—"),
+                  options.map((opt) => h("option", { key: opt.value, value: opt.value }, opt.label))
+                )
+          ),
+          h("div", { className: "sm-nativeDialogFooter" },
+            h("button", { type: "button", className: "sm-nativeDialogButton sm-nativeDialogCancel", onClick: onCancel }, t("bulk.dialog.cancel")),
+            h("button", { type: "button", className: "sm-nativeDialogButton sm-nativeDialogConfirm", disabled: value === "", onClick: () => onApply(value) }, confirmLabel)
+          )
+        )
+      ));
+    }
+    function AnnotationDialog({ sessionId, displayTitle, t, onClose, anchor }) {
+      const annotations = useAnnotations();
+      const latest = annotationOf(annotations, sessionId);
+      const [base, setBase] = useState(() => latest);
+      const [favorite, setFavorite] = useState(() => latest.favorite);
+      const [reviewLater, setReviewLater] = useState(() => latest.reviewLater);
+      const [tagsText, setTagsText] = useState(() => latest.tags.join(", "));
+      const [note, setNote] = useState(() => latest.note);
+      const [priority, setPriority] = useState(() => String(latest.priority ?? 3));
+      const [busy, setBusy] = useState(false);
+      const [error, setError] = useState(null);
+      const dialogRef = useRef(null);
+      // Claim a fresh z-index so this popup always sits above any earlier
+      // popup the user may have opened (annotation popup typically opens on
+      // top of a confirm/move/migrate dialog, so we need a guaranteed-
+      // higher z-index than those static CSS values).
+      const [zIndex] = useState(() => nextDialogZ());
+      const dirty = favorite !== base.favorite || reviewLater !== base.reviewLater || tagsText !== base.tags.join(", ") || note !== base.note || priority !== String(base.priority ?? 3);
+      const cancel = () => { if (busy || dirty && !window.confirm(t("marks.discard"))) return false; onClose(); return true; };
+      const reload = () => {
+        if (dirty && !window.confirm(t("marks.discard"))) return;
+        setBase(latest); setFavorite(latest.favorite); setReviewLater(latest.reviewLater);
+        setTagsText(latest.tags.join(", ")); setNote(latest.note); setPriority(String(latest.priority ?? 3)); setError(null);
+      };
+      const save = async () => {
+        if (busy || annotations.pending.has(sessionId)) return;
+        setBusy(true); setError(null);
+        try {
+          await annotationStore.save(sessionId, { favorite, reviewLater, tags: tagsText.split(/[,，\n]/).map(tag => tag.trim()).filter(Boolean), note, priority: Number(priority) }, base.revision);
+          onClose();
+        } catch (error) {
+          setError(error instanceof Error ? error.message : String(error));
+          if (error?.code === "annotation-conflict") await annotationStore.load(true);
+        } finally { setBusy(false); }
+      };
+      const escStateRef = useRef({}); escStateRef.current = { busy, cancel };
+      useEffect(() => {
+        registerDialogZ(zIndex);
+        const handler = e => {
+          if (e.key !== "Escape" || e.isComposing || e.keyCode === 229) return;
+          if (e.defaultPrevented) return;
+          if (!isTopmostDialog(zIndex)) return;
+          if (escStateRef.current.busy) return;
+          e.preventDefault(); e.stopPropagation();
+          if (escStateRef.current.cancel()) {
+            const ae = document.activeElement;
+            if (ae && typeof ae.blur === "function" && ae !== document.body) ae.blur();
+          }
+        };
+        window.addEventListener("keydown", handler);
+        return () => {
+          unregisterDialogZ(zIndex);
+          window.removeEventListener("keydown", handler);
+        };
+      }, [zIndex]);
+
+      const onKeyDown = e => {
+        if (e.key !== "Tab" || !dialogRef.current) return;
+        const controls = [...dialogRef.current.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)')];
+        if (!controls.length) return;
+        const first = controls[0], last = controls[controls.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      };
+      const [importStatus, setImportStatus] = useState(null);
+      const copyPrompt = async () => {
+        if (busy) return;
+        const text = promptFor(activeLanguage);
+        try {
+          if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === "function") await navigator.clipboard.writeText(text);
+          else { const ta = document.createElement("textarea"); ta.value = text; ta.setAttribute("readonly", ""); ta.style.position = "absolute"; ta.style.left = "-9999px"; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); }
+          setImportStatus(t("marks.import.copy.copied"));
+        } catch (err) { setImportStatus(t("marks.import.copy.failed", { message: err instanceof Error ? err.message : String(err) })); }
+      };
+      const [importText, setImportText] = useState("");
+      const pasteFromInput = () => {
+        if (busy) return;
+        const text = (importText || "").trim();
+        if (!text) { setImportStatus(t("marks.import.failure", { message: t("marks.import.empty") })); return; }
+        if (dirty && !window.confirm(t("marks.import.discard"))) { setImportStatus(null); return; }
+        const result = parseImportedAnnotation(text);
+        if (!result.ok) { setImportStatus(t("marks.import.failure", { message: result.error })); return; }
+        const ann = result.annotation;
+        if (Array.isArray(ann.tags)) setTagsText(ann.tags.join(", "));
+        if (typeof ann.note === "string") setNote(ann.note);
+        if ("priority" in ann) setPriority(String(ann.priority ?? 3));
+        setError(null);
+        const warningLines = (result.warnings || []).map(w => {
+          const field = w.field || t("marks.import.unknown");
+          const detail = w.kind === "truncated" && typeof w.from === "number" && typeof w.to === "number"
+            ? field + ": " + w.from + " -> " + w.to
+            : w.kind === "rejected" && w.value !== undefined ? field + ": " + JSON.stringify(w.value)
+            : w.kind ? field + " (" + w.kind + ")" : field;
+          return "  - " + detail + (w.reason ? " - " + w.reason : "");
+        });
+        if (warningLines.length) setImportStatus(t("marks.import.warnings") + String.fromCharCode(10) + warningLines.join(String.fromCharCode(10)));
+        else setImportStatus(t("marks.import.success"));
+      };
+      // Detect the active UI language by probing a key both dictionaries define.
+      // Falls back to the cached window flag (set elsewhere if available) and ultimately
+      // to "zh" so the prompt never reads empty.
+      const detectLanguage = (translator) => {
+        if (typeof window !== "undefined" && window.__smActiveLanguage) return window.__smActiveLanguage;
+        const sample = translator("marks.favorite");
+        if (typeof sample === "string") {
+          if (sample === "Favorite") return "en";
+          if (sample === "收藏") return "zh";
+        }
+        return "zh";
+      };
+      const activeLanguage = detectLanguage(t);
+      const floatingCoords = useFloatingPosition(anchor, true, { placement: "bottom-end", dialogWidth: 360, dialogHeight: 460 });
+      const hasCoords = floatingCoords !== null || (anchor && typeof anchor.top === "number" && typeof anchor.left === "number");
+      const computedTop = floatingCoords ? floatingCoords.top : (anchor && typeof anchor.top === "number" ? anchor.top : null);
+      const computedLeft = floatingCoords ? floatingCoords.left : (anchor && typeof anchor.left === "number" ? anchor.left : null);
+      const isCentered = Boolean(floatingCoords && floatingCoords.centered);
+      const layerClass = "sm-nativeDialogLayer sm-annotationDialog sm-confirmDialog" + (hasCoords ? " sm-annotationDialog-anchored" : "");
+      const surfaceClass = "sm-nativeDialog sm-panelDialog sm-annotationSurface" + (hasCoords ? " sm-annotationSurface-anchored" : "");
+      const layerStyle = {
+        zIndex: zIndex || undefined,
+        ...(hasCoords
+          ? {
+              position: "fixed",
+              top: computedTop + "px",
+              left: computedLeft + "px",
+              right: "auto",
+              bottom: "auto",
+              inset: `${computedTop}px auto auto ${computedLeft}px`,
+              ...(isCentered ? { transform: "translate(-50%, -50%)" } : {})
+            }
+          : {})
+      };
+      return renderInOverlay(
+        h("div", { className: layerClass, style: layerStyle, role: "presentation" },
+          h("section", { className: surfaceClass, style: { pointerEvents: "auto" }, role: "dialog", "aria-labelledby": "sm-annotation-title", ref: dialogRef, onKeyDown },
+          h("div", { className: "sm-nativeDialogHeader" }, h("h2", { id: "sm-annotation-title", className: "sm-nativeDialogTitle" }, t("marks.title"))),
+          h("div", { className: "sm-annotationBody" },
+            (() => {
+              const targetTitle = displayTitle || sessionId || "";
+              const targetDesc = t ? t("marks.desc", { title: targetTitle }) : `「${targetTitle}」：编辑标记与备注`;
+              return h("div", { className: "sm-annotationTarget", title: targetDesc }, targetDesc);
+            })(),
+            h("div", { className: "sm-annotationChecks" },
+              h("label", null, h("input", { type: "checkbox", "aria-label": t("marks.favorite"), checked: favorite, disabled: busy, onChange: e => setFavorite(e.target.checked) }), t("marks.favorite")),
+              h("label", { className: "sm-annotationPriority" },
+                h("span", null, t("marks.priority")),
+                h("select", { className: "sm-viewSelect sm-prioritySelectInline", "aria-label": t("marks.priority"), value: priority, disabled: busy, onChange: e => setPriority(e.target.value) },
+                  [1,2,3,4,5].map(value => h("option", { key: value, value: String(value) }, t("marks.priority." + value)))
+                )
+              ),
+              h("label", null, h("input", { type: "checkbox", "aria-label": t("marks.review"), checked: reviewLater, disabled: busy, onChange: e => setReviewLater(e.target.checked) }), t("marks.review")),
+              h("small", null, t("marks.priority.help"))
+            ),
+            h("label", { className: "sm-viewField sm-fieldWithClear" }, h("span", null, t("marks.tags")), h("div", { className: "sm-fieldRow sm-fieldRowNote" }, h("textarea", { className: "sm-noteInput", "aria-label": t("marks.tags"), value: tagsText, maxLength: 1000, autoFocus: true, rows: 3, placeholder: t("marks.tags.placeholder"), disabled: busy, onChange: e => setTagsText(e.target.value) }), tagsText && !busy ? h("button", { type: "button", className: "sm-fieldClear sm-fieldClearNote", "aria-label": t("marks.tags.clear"), title: t("marks.tags.clear"), onClick: () => setTagsText("") }, String.fromCharCode(10005)) : null)),
+            h("label", { className: "sm-viewField sm-fieldWithClear" }, h("span", null, t("marks.note")), h("div", { className: "sm-fieldRow sm-fieldRowNote" }, h("textarea", { className: "sm-noteInput", "aria-label": t("marks.note"), value: note, maxLength: 2000, rows: 3, placeholder: t("marks.note.placeholder"), disabled: busy, onChange: e => setNote(e.target.value) }), note && !busy ? h("button", { type: "button", className: "sm-fieldClear sm-fieldClearNote", "aria-label": t("marks.note.clear"), title: t("marks.note.clear"), onClick: () => setNote("") }, String.fromCharCode(10005)) : null)),
+            latest.revision !== base.revision ? h("div", { className: "sm-markConflict", role: "status" }, t("marks.conflict"), h("button", { type: "button", className: "sm-resetFilters", disabled: busy, onClick: reload }, t("marks.reload"))) : null,
+            annotations.error ? h("div", { className: "sm-error", role: "alert" }, t("marks.error", { message: annotations.error }), h("button", { type: "button", className: "sm-resetFilters", disabled: busy || annotations.loading, onClick: () => annotationStore.load(true) }, t("marks.retry"))) : null,
+            error ? h("div", { className: "sm-error", role: "alert" }, error) : null
+          ),
+          h("div", { className: "sm-importGroup" },
+            h("div", { className: "sm-importGroupHeader" },
+              h("span", { className: "sm-importLabel" }, t("marks.import.paste.label")),
+              h("div", { className: "sm-importGroupButtons" },
+                h("button", { type: "button", className: "sm-importBtn", disabled: busy || !importText.trim(), onClick: pasteFromInput }, t("marks.import.paste")),
+                h("button", { type: "button", className: "sm-importBtn", disabled: busy, onClick: copyPrompt }, t("marks.import.copy")))),
+            h("div", { className: "sm-fieldWithClear" },
+              h("div", { className: "sm-fieldRow sm-fieldRowNote" },
+                h("textarea", { className: "sm-noteInput", "aria-label": t("marks.import.paste.aria"), value: importText, placeholder: t("marks.import.paste.placeholder"), disabled: busy, rows: 3, onChange: e => setImportText(e.target.value) }),
+                importText && !busy ? h("button", { type: "button", className: "sm-fieldClear sm-fieldClearNote", "aria-label": t("marks.import.paste.clear"), title: t("marks.import.paste.clear"), onClick: () => setImportText("") }, String.fromCharCode(10005)) : null))),
+            importStatus ? h("div", { className: "sm-importStatus", role: "status" }, importStatus) : null,
+          h("div", { className: "sm-nativeDialogFooter" },
+            h("button", { type: "button", className: "sm-nativeDialogButton sm-nativeDialogCancel", disabled: busy, onClick: cancel }, t("marks.cancel")),
+            h("button", { type: "button", className: "sm-nativeDialogButton sm-nativeDialogConfirm", disabled: busy || !annotations.loaded || !!annotations.error || latest.revision !== base.revision, onClick: save }, t(busy ? "marks.saving" : "marks.save"))
+          )
+        )
+      ));
+    }
+
+
+    const formatRelative = (ts, now) => {
+      const timestamp = sessionTime(ts);
+      if (timestamp === null) return "—";
+      const diff = Math.max(0, now - timestamp);
+      const s = Math.floor(diff / 1000);
+      if (s < 60) return s + "s";
+      const m = Math.floor(s / 60);
+      if (m < 60) return m + "m";
+      const hr = Math.floor(m / 60);
+      if (hr < 24) return hr + "h";
+      const d = Math.floor(hr / 24);
+      if (d < 30) return d + "d";
+      const mo = Math.floor(d / 30);
+      if (mo < 12) return mo + "mo";
+      return Math.floor(mo / 12) + "y";
+    };
+    const shortPath = (cwd) => {
+      if (!cwd) return "";
+      const parts = cwd.replace(/[\\\/]+$/, "").split(/[\\\/]/);
+      const last = parts[parts.length - 1] || "";
+      return last.length > 26 ? last.slice(0, 24) + "\u2026" : last;
+    };
+
+    function ConfirmDialog(props) {
+      const open = props.open === true;
+      const onCancel = typeof props.onCancel === "function" ? props.onCancel : () => {};
+      const onConfirm = typeof props.onConfirm === "function" ? props.onConfirm : () => {};
+      const busy = props.busy === true;
+      const danger = props.danger === true;
+      const dialogRef = useRef(null);
+      const layerRef = useRef(null);
+      // Claim a fresh z-index so this popup sits above any earlier popup.
+      const [zIndex] = useState(() => open ? nextDialogZ() : 0);
+      const title = props.title || "";
+      const description = props.description || "";
+      const warning = props.warning || "";
+      const confirmLabel = props.confirmLabel || "确认";
+      const cancelLabel = props.cancelLabel || "取消";
+      // Esc is handled at window level (issue #7): the layer-bound
+      // onKeyDown was unreachable when the row button that opened
+      // the dialog stayed focused. ConfirmDialog's portal to body
+      // makes it a separate subtree from the panel section, so
+      // keydown never bubbles through it. Enter was previously on
+      // the layer too, but that races with the focused Cancel /
+      // Confirm button's native Enter handler -- removing the layer
+      // Enter leaves Enter handling purely to the focused button.
+      const escStateRef = useRef({});
+      escStateRef.current = { busy, onCancel };
+      useEffect(() => {
+        if (!open) return;
+        const effectiveZ = zIndex || nextDialogZ();
+        registerDialogZ(effectiveZ);
+        const handler = (e) => {
+          if (e.key !== "Escape") return;
+          if (e.defaultPrevented) return;
+          if (!isTopmostDialog(effectiveZ)) return;
+          const s = escStateRef.current;
+          if (s.busy) return;
+          e.preventDefault();
+          e.stopPropagation();
+          s.onCancel();
+          // See SessionManagerPanel for the rationale.
+          const ae = document.activeElement;
+          if (ae && typeof ae.blur === "function" && ae !== document.body) ae.blur();
+        };
+        window.addEventListener("keydown", handler);
+        const mountTime = Date.now();
+        const clickHandler = (e) => {
+          if (Date.now() - mountTime < 50) return;
+          if (e.defaultPrevented) return;
+          if (escStateRef.current.busy) return;
+          if (!isTopmostDialog(effectiveZ)) return;
+          if (isClickInsideDialog(e, dialogRef, layerRef)) return;
+          if (e && typeof e.preventDefault === "function") e.preventDefault();
+          if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+          if (e && typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+          escStateRef.current.onCancel();
+        };
+        window.addEventListener("click", clickHandler, true);
+        return () => {
+          unregisterDialogZ(effectiveZ);
+          window.removeEventListener("keydown", handler);
+          window.removeEventListener("click", clickHandler, true);
+        };
+      }, [open, zIndex]);
+
+      const floatingCoords = useFloatingPosition(props.anchor, open, { placement: "bottom-end", dialogWidth: 360, dialogHeight: 180 });
+
+      if (!open) return null;
+
+      const topPx = floatingCoords ? floatingCoords.top : (props.anchor && typeof props.anchor.top === "number" ? props.anchor.top : null);
+      const leftPx = floatingCoords ? floatingCoords.left : (props.anchor && typeof props.anchor.left === "number" ? props.anchor.left : null);
+      const isCentered = Boolean(floatingCoords && floatingCoords.centered);
+      const hasCoords = topPx !== null && leftPx !== null;
+
+      const layerStyle = {
+        zIndex: zIndex || undefined,
+        ...(hasCoords
+          ? {
+              position: "fixed",
+              top: topPx + "px",
+              left: leftPx + "px",
+              right: "auto",
+              bottom: "auto",
+              inset: `${topPx}px auto auto ${leftPx}px`,
+              ...(isCentered ? { transform: "translate(-50%, -50%)" } : {})
+            }
+          : {})
+      };
+
+      const confirmDisabled = props.confirmDisabled === true;
+
+      return renderInOverlay(
+        h("div", {
+          ref: layerRef,
+          className: "sm-nativeDialogLayer sm-confirmDialog" + (hasCoords ? " sm-confirmDialog-anchored" : ""),
+          style: layerStyle,
+          role: "presentation"
+        },
+          h("section", {
+            ref: dialogRef,
+            className: "sm-nativeDialog",
+            style: { pointerEvents: "auto" },
+          role: "dialog",
+          "aria-modal": "true",
+          "aria-labelledby": "sm-confirm-dialog-title"
+        },
+          h("div", { className: "sm-nativeDialogHeader" },
+            h("h2", { id: "sm-confirm-dialog-title", className: "sm-nativeDialogTitle" }, title)
+          ),
+          h("div", { className: "sm-nativeDialogBody" },
+            description ? h("div", { className: "sm-nativeDialogDescription" }, description) : null,
+            warning ? h("div", { className: "sm-warn sm-bulkDialogWarn" }, warning) : null
+          ),
+          h("div", { className: "sm-nativeDialogFooter" },
+            h("button", {
+              type: "button",
+              className: "sm-nativeDialogButton sm-nativeDialogCancel",
+              disabled: busy,
+              onClick: () => { if (!busy) onCancel(); }
+            }, cancelLabel),
+            h("button", {
+              type: "button",
+              className: "sm-nativeDialogButton" + (danger ? " sm-nativeDialogDanger" : " sm-nativeDialogConfirm"),
+              disabled: busy || confirmDisabled,
+              onClick: () => { if (!busy && !confirmDisabled) onConfirm(); }
+            }, confirmLabel)
+          )
+        )
+      ));
+    }
+
+    function MoveDialog(props) {
+      const t = typeof props.t === "function" ? props.t : (key) => key;
+      const open = props.open === true;
+      const onCancel = typeof props.onCancel === "function" ? props.onCancel : () => {};
+      const onConfirm = typeof props.onConfirm === "function" ? props.onConfirm : () => {};
+      const busy = props.busy === true;
+      const dialogRef = useRef(null);
+      const layerRef = useRef(null);
+      const title = props.title || t("confirm.move.title");
+      const description = props.description || "";
+      const currentWorkspaceId = props.currentWorkspaceId || "";
+      const confirmLabel = props.confirmLabel || t("confirm.move.confirm");
+      const cancelLabel = props.cancelLabel || t("confirm.cancel");
+      const error = props.error || "";
+      // Claim a fresh z-index so this popup sits above any earlier popup.
+      const [zIndex] = useState(() => open ? nextDialogZ() : 0);
+      const rawList = Array.isArray(props.workspaces) ? props.workspaces : [];
+      const list = rawList.filter((ws) => ws && typeof ws === "object" && typeof ws.id === "string");
+      if (currentWorkspaceId && !list.some((ws) => ws.id === currentWorkspaceId)) {
+        list.unshift({ id: currentWorkspaceId, title: currentWorkspaceId, name: currentWorkspaceId });
+      }
+      const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(() => currentWorkspaceId || (list[0]?.id || ""));
+      useEffect(() => {
+        if (open) {
+          if (currentWorkspaceId) setSelectedWorkspaceId(currentWorkspaceId);
+          else if (!selectedWorkspaceId && list.length > 0) setSelectedWorkspaceId(list[0].id);
+        }
+      }, [open, currentWorkspaceId, list.length]);
+      // Esc handled at window level (issue #7) -- Enter stays on the
+      // layer because (a) it gates on selectedWorkspaceId which is set
+      // only by clicking a listbox item, and (b) racing Enter on the
+      // Cancel / Confirm buttons is benign since the layer Enter
+      // handler only fires when focus is inside the dialog subtree,
+      // which is exactly when the focused button's native Enter has
+      // already triggered its own click -- and in MoveDialog that
+      // click just toggles selection, never cancels or confirms.
+      const escStateRef = useRef({});
+      escStateRef.current = { busy, onCancel };
+      useEffect(() => {
+        if (!open) return;
+        const effectiveZ = zIndex || nextDialogZ();
+        registerDialogZ(effectiveZ);
+        const handler = (e) => {
+          if (e.key !== "Escape") return;
+          if (e.defaultPrevented) return;
+          if (!isTopmostDialog(effectiveZ)) return;
+          const s = escStateRef.current;
+          if (s.busy) return;
+          e.preventDefault();
+          e.stopPropagation();
+          s.onCancel();
+          // See SessionManagerPanel for the rationale.
+          const ae = document.activeElement;
+          if (ae && typeof ae.blur === "function" && ae !== document.body) ae.blur();
+        };
+        window.addEventListener("keydown", handler);
+        const mountTime = Date.now();
+        const clickHandler = (e) => {
+          if (Date.now() - mountTime < 50) return;
+          if (e.defaultPrevented) return;
+          if (escStateRef.current.busy) return;
+          if (!isTopmostDialog(effectiveZ)) return;
+          if (isClickInsideDialog(e, dialogRef, layerRef)) return;
+          if (e && typeof e.preventDefault === "function") e.preventDefault();
+          if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+          if (e && typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+          escStateRef.current.onCancel();
+        };
+        window.addEventListener("click", clickHandler, true);
+        return () => {
+          unregisterDialogZ(effectiveZ);
+          window.removeEventListener("keydown", handler);
+          window.removeEventListener("click", clickHandler, true);
+        };
+      }, [open, zIndex]);
+      if (!open) return null;
+
+      const isSame = Boolean(selectedWorkspaceId && currentWorkspaceId && selectedWorkspaceId === currentWorkspaceId);
+      const isReady = Boolean(selectedWorkspaceId && !isSame && list.length > 0);
+      const body = h("div", { className: "sm-nativeDialogBody" },
+        description ? h("div", { className: "sm-nativeDialogDescription" }, description) : null,
+        list.length === 0
+          ? h("div", { className: "sm-moveLabel" }, t("confirm.move.empty"))
+          : h("div", { className: "sm-moveSection" },
+              h("select", {
+                className: "sm-viewSelect",
+                value: selectedWorkspaceId,
+                onChange: (e) => setSelectedWorkspaceId(e.target.value),
+                "aria-label": t("confirm.move.select"),
+                autoFocus: true,
+                disabled: busy
+              },
+                list.map((ws) => h("option", { key: ws.id, value: ws.id }, String(ws.title || ws.name || ws.id)))
+              ),
+              isSame ? h("div", { className: "sm-migrateWarn" }, t("confirm.move.same")) : null
+            ),
+        error ? h("div", { className: "sm-error", role: "alert" }, String(error)) : null
+      );
+      // Single cancel button (footer) + ESC handler. No "x" close button so the
+      // user only sees one cancel entry point.
+      const onKeyDown = (e) => {
+        // Enter only -- Esc moved to a window-level listener (see above).
+        if (e.key === "Enter" && !busy && selectedWorkspaceId && list.length > 0) {
+          if (selectedWorkspaceId === currentWorkspaceId) return;
+          e.preventDefault();
+          onConfirm(selectedWorkspaceId);
+        }
+      };
+      const floatingCoords = useFloatingPosition(props.anchor, open, { placement: "bottom-end", dialogWidth: 360, dialogHeight: 320 });
+      const topPx = floatingCoords ? floatingCoords.top : (props.anchor && typeof props.anchor.top === "number" ? props.anchor.top : null);
+      const leftPx = floatingCoords ? floatingCoords.left : (props.anchor && typeof props.anchor.left === "number" ? props.anchor.left : null);
+      const isCentered = Boolean(floatingCoords && floatingCoords.centered);
+      const hasCoords = topPx !== null && leftPx !== null;
+
+      const layerStyle = {
+        zIndex: zIndex || undefined,
+        ...(hasCoords
+          ? {
+              position: "fixed",
+              top: topPx + "px",
+              left: leftPx + "px",
+              right: "auto",
+              bottom: "auto",
+              inset: `${topPx}px auto auto ${leftPx}px`,
+              ...(isCentered ? { transform: "translate(-50%, -50%)" } : {})
+            }
+          : {})
+      };
+      return renderInOverlay(
+        h("div", {
+          ref: layerRef,
+          className: "sm-nativeDialogLayer sm-confirmDialog" + (hasCoords ? " sm-confirmDialog-anchored" : ""),
+          style: layerStyle,
+          role: "presentation",
+          onKeyDown
+        },
+          h("section", {
+            ref: dialogRef,
+            className: "sm-nativeDialog",
+            style: { pointerEvents: "auto" },
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-labelledby": "sm-move-dialog-title"
+          },
+            h("div", { className: "sm-nativeDialogHeader" },
+              h("h2", { id: "sm-move-dialog-title", className: "sm-nativeDialogTitle" }, title)
+            ),
+            body,
+            h("div", { className: "sm-nativeDialogFooter" },
+              h("button", {
+                type: "button",
+                className: "sm-nativeDialogButton sm-nativeDialogCancel",
+                disabled: busy,
+                onClick: onCancel
+              }, cancelLabel),
+              h("button", {
+                type: "button",
+                className: "sm-nativeDialogButton sm-nativeDialogConfirm",
+                disabled: busy || !isReady,
+                onClick: () => { if (!busy && isReady) onConfirm(selectedWorkspaceId); }
+              }, confirmLabel)
+            )
+          )
+        )
+      );
+    }
+
+    function MigratePresetDialog(props) {
+      const t = typeof props.t === "function" ? props.t : (key) => key;
+      const open = props.open === true;
+      const onCancel = typeof props.onCancel === "function" ? props.onCancel : () => {};
+      const onRun = typeof props.onRun === "function" ? props.onRun : () => {};
+      const busy = props.busy === true;
+      const dialogRef = useRef(null);
+      const layerRef = useRef(null);
+      const sessionId = props.sessionId || "";
+      const description = props.description || "";
+      const fallbackPreset = props.currentPreset || "";
+      const [scan, setScan] = useState(null);
+      const [target, setTarget] = useState("");
+      // Claim a fresh z-index so this popup sits above any earlier popup.
+      const [zIndex] = useState(() => open ? nextDialogZ() : 0);
+      const floatingCoords = useFloatingPosition(props.anchor, open, { placement: "bottom-end", dialogWidth: 360, dialogHeight: 320 });
+      useEffect(() => {
+        if (!open || !sessionId) return;
+        let alive = true;
+        // Skip setScan(null)/setTarget("") -- no-ops on initial mount that
+        // would force an extra render cycle, slowing dialog open.
+        fetchApi("/preset-scan?sessionId=" + encodeURIComponent(sessionId)).then((d) => {
+          if (!alive) return;
+          if (d && d.ok) {
+            const result = d.result || {};
+            const rows = Array.isArray(result.rows)
+              ? result.rows
+              : (result.rows && Array.isArray(result.rows.rows) ? result.rows.rows : []);
+            const availablePresets = Array.isArray(result.availablePresets)
+              ? result.availablePresets
+              : (result.rows && Array.isArray(result.rows.availablePresets) ? result.rows.availablePresets : []);
+            const row = rows.find((item) => item && item.sessionId === sessionId) || null;
+            setScan({ ok: true, row, availablePresets });
+          } else {
+            setScan({ ok: false, error: (d && d.error) || "scan failed" });
+          }
+        }).catch((error) => {
+          if (alive) setScan({ ok: false, error: error instanceof Error ? error.message : String(error) });
+        });
+        return () => { alive = false; };
+      }, [open, sessionId]);
+      // Esc handled at window level (issue #7). MigratePresetDialog is
+      // a sibling of the panel layer in the panel's render tree, so
+      // the layer-bound onKeyDown (which the dialog relied on for
+      // Esc) was dead code -- focus never reached the dialog's own
+      // subtree because the row Migrate button stayed focused.
+      const escStateRef = useRef({});
+      escStateRef.current = { busy, onCancel };
+      useEffect(() => {
+        if (!open) return;
+        const effectiveZ = zIndex || nextDialogZ();
+        registerDialogZ(effectiveZ);
+        const handler = (e) => {
+          if (e.key !== "Escape") return;
+          if (e.defaultPrevented) return;
+          if (!isTopmostDialog(effectiveZ)) return;
+          const s = escStateRef.current;
+          if (s.busy) return;
+          e.preventDefault();
+          e.stopPropagation();
+          s.onCancel();
+          // See SessionManagerPanel for the rationale.
+          const ae = document.activeElement;
+          if (ae && typeof ae.blur === "function" && ae !== document.body) ae.blur();
+        };
+        window.addEventListener("keydown", handler);
+        const mountTime = Date.now();
+        const clickHandler = (e) => {
+          if (Date.now() - mountTime < 50) return;
+          if (e.defaultPrevented) return;
+          if (escStateRef.current.busy) return;
+          if (!isTopmostDialog(effectiveZ)) return;
+          if (isClickInsideDialog(e, dialogRef, layerRef)) return;
+          if (e && typeof e.preventDefault === "function") e.preventDefault();
+          if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+          if (e && typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+          escStateRef.current.onCancel();
+        };
+        window.addEventListener("click", clickHandler, true);
+        return () => {
+          unregisterDialogZ(effectiveZ);
+          window.removeEventListener("keydown", handler);
+          window.removeEventListener("click", clickHandler, true);
+        };
+      }, [open, zIndex]);
+      if (!open) return null;
+
+      const currentPreset = (scan && scan.ok && scan.row && (scan.row.finalPreset || scan.row.headerPreset)) || fallbackPreset || "—";
+      const presets = scan && scan.ok
+        ? Array.from(new Set((scan.availablePresets || []).filter((preset) => typeof preset === "string" && preset.length > 0))).sort()
+        : [];
+      const allPresets = Array.from(new Set([
+        ...(currentPreset && currentPreset !== "—" ? [currentPreset] : []),
+        ...presets
+      ])).sort();
+      const selectedTarget = target || (currentPreset !== "—" ? currentPreset : (allPresets[0] || ""));
+      const isSame = Boolean(selectedTarget && currentPreset && selectedTarget === currentPreset && currentPreset !== "—");
+      const ready = Boolean(selectedTarget && !isSame && selectedTarget !== "—");
+      const body = h("div", { className: "sm-nativeDialogBody" },
+        description ? h("div", { className: "sm-nativeDialogDescription" }, description) : null,
+        scan === null
+          ? h("div", { className: "sm-empty" }, t("busy.processing"))
+          : !scan.ok
+            ? h("div", { className: "sm-error", role: "alert" }, scan.error || "scan failed")
+            : allPresets.length === 0
+              ? h("div", { className: "sm-moveLabel" }, t("migrate.noPresets"))
+              : h("div", { className: "sm-moveSection" },
+                  h("select", {
+                    className: "sm-viewSelect",
+                    value: selectedTarget,
+                    onChange: (e) => setTarget(e.target.value),
+                    "aria-label": t("migrate.target"),
+                    autoFocus: true,
+                    disabled: busy
+                  },
+                    allPresets.map((preset) => h("option", { key: preset, value: preset }, preset))
+                  )
+                )
+      );
+      const topPx = floatingCoords ? floatingCoords.top : (props.anchor && typeof props.anchor.top === "number" ? props.anchor.top : null);
+      const leftPx = floatingCoords ? floatingCoords.left : (props.anchor && typeof props.anchor.left === "number" ? props.anchor.left : null);
+      const isCentered = Boolean(floatingCoords && floatingCoords.centered);
+      const hasCoords = topPx !== null && leftPx !== null;
+      const layerStyle = {
+        zIndex: zIndex || undefined,
+        ...(hasCoords
+          ? {
+              position: "fixed",
+              top: topPx + "px",
+              left: leftPx + "px",
+              right: "auto",
+              bottom: "auto",
+              inset: `${topPx}px auto auto ${leftPx}px`,
+              ...(isCentered ? { transform: "translate(-50%, -50%)" } : {})
+            }
+          : {})
+      };
+      return renderInOverlay(
+        h("div", {
+          ref: layerRef,
+          className: "sm-nativeDialogLayer sm-confirmDialog" + (hasCoords ? " sm-confirmDialog-anchored" : ""),
+          role: "presentation",
+          style: layerStyle
+        },
+          h("section", {
+            ref: dialogRef,
+            className: "sm-nativeDialog",
+            style: { pointerEvents: "auto" },
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-labelledby": "sm-migrate-dialog-title"
+          },
+          h("div", { className: "sm-nativeDialogHeader" },
+            h("h2", { id: "sm-migrate-dialog-title", className: "sm-nativeDialogTitle" }, t("migrate.title"))
+          ),
+          body,
+          h("div", { className: "sm-nativeDialogFooter" },
+            h("button", {
+              type: "button",
+              className: "sm-nativeDialogButton sm-nativeDialogCancel",
+              disabled: busy,
+              onClick: onCancel
+            }, t("confirm.cancel")),
+            h("button", {
+              type: "button",
+              className: "sm-nativeDialogButton sm-nativeDialogConfirm",
+              disabled: busy || !ready,
+              onClick: () => { if (ready) onRun(selectedTarget); }
+            }, busy ? t("busy.processing") : t("migrate.confirm"))
+          )
+        )
+      ));
+    }
+
+    const CURRENT_VERSION = "0.7.5";
+
+    function compareSemver(v1, v2) {
+      if (typeof v1 !== "string" || typeof v2 !== "string") return 0;
+      const parse = (v) => {
+        // Strip build metadata (+...)
+        const noBuild = v.trim().replace(/^[vV]/, "").split("+")[0];
+        const hyphenIdx = noBuild.indexOf("-");
+        const core = hyphenIdx === -1 ? noBuild : noBuild.slice(0, hyphenIdx);
+        const prerelease = hyphenIdx === -1 ? undefined : noBuild.slice(hyphenIdx + 1);
+        const parts = (core || "").split(".").map(n => parseInt(n, 10) || 0);
+        while (parts.length < 3) parts.push(0);
+        return { parts, prerelease: prerelease !== undefined ? prerelease.trim() : undefined };
+      };
+      const p1 = parse(v1);
+      const p2 = parse(v2);
+      for (let i = 0; i < 3; i++) {
+        if (p1.parts[i] > p2.parts[i]) return 1;
+        if (p1.parts[i] < p2.parts[i]) return -1;
+      }
+      // When major, minor, patch match: version without prerelease is higher
+      if (p1.prerelease && !p2.prerelease) return -1;
+      if (!p1.prerelease && p2.prerelease) return 1;
+      if (p1.prerelease && p2.prerelease) {
+        if (p1.prerelease === p2.prerelease) return 0;
+        const id1 = p1.prerelease.split(".");
+        const id2 = p2.prerelease.split(".");
+        const maxLen = Math.max(id1.length, id2.length);
+        for (let i = 0; i < maxLen; i++) {
+          if (i >= id1.length) return -1;
+          if (i >= id2.length) return 1;
+          const part1 = id1[i];
+          const part2 = id2[i];
+          if (part1 === part2) continue;
+          const num1 = /^\d+$/.test(part1) ? parseInt(part1, 10) : null;
+          const num2 = /^\d+$/.test(part2) ? parseInt(part2, 10) : null;
+          if (num1 !== null && num2 !== null) {
+            if (num1 > num2) return 1;
+            if (num1 < num2) return -1;
+          } else if (num1 !== null && num2 === null) {
+            return -1;
+          } else if (num1 === null && num2 !== null) {
+            return 1;
+          } else {
+            if (part1 > part2) return 1;
+            if (part1 < part2) return -1;
+          }
+        }
+      }
+      return 0;
+    }
+
+    const updateStore = {
+      state: {
+        status: "idle",
+        currentVersion: CURRENT_VERSION,
+        runningVersion: CURRENT_VERSION,
+        installedVersion: null,
+        latestVersion: null,
+        error: null,
+        application: null,
+        dialogOpen: false,
+        checkedAt: null,
+        lastAttemptAt: null,
+        source: null,
+        notes: null,
+        channelSwitch: null,
+        rollbackInfo: null,
+        taskId: null,
+      },
+      CHECK_INTERVAL_MS: 6 * 60 * 60 * 1000,
+      RETRY_COOLDOWN_MS: 30 * 60 * 1000,
+      lastFailedAt: null,
+      listeners: new Set(),
+      _statusPromise: null,
+      getSnapshot() { return this.state; },
+      subscribe(cb) {
+        this.listeners.add(cb);
+        return () => this.listeners.delete(cb);
+      },
+      _notify() {
+        this.state = { ...this.state };
+        for (const fn of [...this.listeners]) fn();
+      },
+      openDialog() {
+        this.state.dialogOpen = true;
+        this._notify();
+      },
+      closeDialog() {
+        try {
+          if (typeof localStorage !== "undefined") {
+            const currentTaskId = this.state.taskId || this.state.rollbackInfo?.taskId;
+            if (currentTaskId && this.state.status !== "updating") {
+              localStorage.setItem("dsh-sm-ack-task", currentTaskId);
+            }
+          }
+        } catch (_) {}
+        this.state.dialogOpen = false;
+        if (this.state.status !== "updating") {
+          this.state.status = "idle";
+        }
+        this._notify();
+      },
+      async checkRecentStatus() {
+        if (this._statusPromise) return this._statusPromise;
+        if (this.state.status === "updating") return;
+        this._statusPromise = (async () => {
+          try {
+            const statusData = await fetchApi("/update/status");
+            if (statusData && statusData.ok && statusData.result) {
+              const r = statusData.result;
+              const ackTaskId = (typeof localStorage !== "undefined") ? localStorage.getItem("dsh-sm-ack-task") : null;
+              if (r.taskId && r.taskId === ackTaskId) return;
+              if (this.state.taskId === r.taskId && (this.state.status === "done" || this.state.status === "error")) return;
+
+              const runningV = r.runningVersion || r.currentVersion || this.state.runningVersion || this.state.currentVersion || CURRENT_VERSION;
+              const installedV = r.installedVersion || (r.status === "completed" ? (r.targetVersion || runningV) : runningV);
+              this.state.runningVersion = runningV;
+              this.state.currentVersion = runningV;
+              if (compareSemver(installedV, runningV) > 0) {
+                this.state.installedVersion = installedV;
+              }
+
+              if (r.status === "rolled-back" || (r.status === "failed" && r.rolledBack)) {
+                this.state.status = "error";
+                this.state.taskId = r.taskId;
+                this.state.rollbackInfo = {
+                  rolledBack: true,
+                  currentVersion: r.currentVersion || runningV,
+                  reason: r.error || "未知原因",
+                  taskId: r.taskId
+                };
+                this.state.error = (r.error || "升级未成功") + "（已安全回滚至旧版本 v" + (r.currentVersion || runningV) + "）";
+                this.state.dialogOpen = true;
+                this._notify();
+              } else if (r.status === "completed") {
+                const targetV = r.targetVersion || this.state.latestVersion || installedV;
+                this.state.taskId = r.taskId;
+                this.state.latestVersion = targetV;
+                this.state.installedVersion = targetV;
+
+                // If DSH was restarted and already running targetV or higher, do not popup again!
+                if (compareSemver(runningV, targetV) >= 0) {
+                  try {
+                    if (typeof localStorage !== "undefined" && r.taskId) {
+                      localStorage.setItem("dsh-sm-ack-task", r.taskId);
+                    }
+                  } catch (_) {}
+                  return;
+                }
+
+                if (r.application === "applied") {
+                  this.state.runningVersion = targetV;
+                  this.state.currentVersion = targetV;
+                }
+
+                this.state.status = "done";
+                this.state.application = r.application || "restart-required";
+                this.state.dialogOpen = true;
+                this._notify();
+              } else if (r.status === "recovery-required") {
+                this.state.status = "error";
+                this.state.taskId = r.taskId;
+                this.state.error = "更新失败且自动恢复旧版本失败: " + (r.rollbackError || r.error) + "。请手动重新安装插件。";
+                this.state.dialogOpen = true;
+                this._notify();
+              }
+            }
+          } catch (_) {}
+          finally {
+            this._statusPromise = null;
+          }
+        })();
+        return this._statusPromise;
+      },
+      getAutoCheck() {
+        try {
+          if (typeof localStorage !== "undefined") {
+            return localStorage.getItem("dsh-session-manager-auto-check") !== "false";
+          }
+        } catch (_) {}
+        return true;
+      },
+      setAutoCheck(enabled) {
+        try {
+          if (typeof localStorage !== "undefined") {
+            localStorage.setItem("dsh-session-manager-auto-check", enabled ? "true" : "false");
+          }
+        } catch (_) {}
+        this._notify();
+      },
+      shouldAutoCheck(now = Date.now()) {
+        if (!this.getAutoCheck()) return false;
+        if (this.state.status === "checking" || this.state.status === "updating") return false;
+        if (this.state.status === "available") return false;
+        if (this.state.installedVersion && compareSemver(this.state.installedVersion, this.state.currentVersion) > 0) {
+          return false;
+        }
+        if (this.lastFailedAt && (now - this.lastFailedAt < this.RETRY_COOLDOWN_MS)) {
+          return false;
+        }
+        if (this.state.checkedAt && (now - this.state.checkedAt < this.CHECK_INTERVAL_MS)) {
+          return false;
+        }
+        return true;
+      },
+      async maybeAutoCheck(options = {}) {
+        const now = typeof options.now === "number" ? options.now : Date.now();
+        if (!this.shouldAutoCheck(now)) return this.state;
+        return this.checkForUpdate({
+          silent: true,
+          openOnFound: false,
+          openDialog: false,
+          ...options,
+          manual: false
+        });
+      },
+      // Dialog opacity preference (Issue #23). Reuses the same localStorage
+      // backed preference store as autoCheck / registry instead of adding a
+      // second storage mechanism.
+      DIALOG_OPACITY: SM_DIALOG_OPACITY,
+      DIALOG_OPACITY_KEY: SM_DIALOG_OPACITY_KEY,
+      getDialogOpacity() {
+        return smReadDialogOpacity();
+      },
+      setDialogOpacity(value) {
+        const next = applyDialogOpacity(value);
+        try {
+          if (typeof localStorage !== "undefined") {
+            localStorage.setItem(SM_DIALOG_OPACITY_KEY, String(next));
+          }
+        } catch (_) {}
+        this._notify();
+        return next;
+      },
+      resetDialogOpacity() {
+        return this.setDialogOpacity(SM_DIALOG_OPACITY.default);
+      },
+      REGISTRY_OPTIONS: {
+        "registry.npmjs.org": "https://registry.npmjs.org",
+        "registry.npmmirror.com": "https://registry.npmmirror.com",
+        "127.0.0.1:4873": "http://127.0.0.1:4873",
+      },
+      DEFAULT_REGISTRY: "registry.npmjs.org",
+      getRegistry() {
+        try {
+          if (typeof localStorage !== "undefined") {
+            const v = localStorage.getItem("dsh-session-manager-registry");
+            if (v && (this.REGISTRY_OPTIONS[v] || /^https?:\/\//i.test(v))) return v;
+          }
+        } catch (_) {}
+        return this.DEFAULT_REGISTRY;
+      },
+      setRegistry(key) {
+        try {
+          if (typeof localStorage !== "undefined") {
+            if (this.REGISTRY_OPTIONS[key] || (key && /^https?:\/\//i.test(key))) {
+              localStorage.setItem("dsh-session-manager-registry", key);
+            } else {
+              localStorage.setItem("dsh-session-manager-registry", this.DEFAULT_REGISTRY);
+            }
+          }
+        } catch (_) {}
+        this._notify();
+      },
+      getRegistryUrl() {
+        const reg = this.getRegistry();
+        if (/^https?:\/\//i.test(reg)) return reg;
+        return this.REGISTRY_OPTIONS[reg] || this.REGISTRY_OPTIONS[this.DEFAULT_REGISTRY];
+      },
+      async checkForUpdate(options = {}) {
+        const { silent = false, openOnFound = true, manual = false } = options;
+        const shouldOpenDialog = options.openDialog ?? (manual && !silent && options.openOnFound !== false);
+        if (this.state.status === "checking" || this.state.status === "updating") return this.state;
+
+        this.state.status = "checking";
+        this.state.error = null;
+        this.state.notes = null;
+        if (shouldOpenDialog) {
+          this.state.dialogOpen = true;
+        }
+        this._notify();
+
+        const timeoutMs = typeof options.timeoutMs === "number" ? options.timeoutMs : 10000;
+        let timeoutTimer = null;
+        const abortController = typeof AbortController !== "undefined" ? new AbortController() : null;
+
+        try {
+          if (abortController) {
+            timeoutTimer = setTimeout(() => {
+              abortController.abort(new Error("检查更新超时"));
+            }, timeoutMs);
+          }
+
+          let res = null;
+          if (typeof window !== "undefined" && window.__DSH_SM_TEST_UPDATE__) {
+            const testOverride = window.__DSH_SM_TEST_UPDATE__;
+            if (testOverride.error) {
+              throw new Error(testOverride.error);
+            }
+            const cur = testOverride.currentVersion || this.state.currentVersion;
+            const lat = testOverride.latestVersion || "9.9.9";
+            const src = testOverride.source || "npm";
+            const hasUpdate = typeof testOverride.hasUpdate === "boolean"
+              ? testOverride.hasUpdate
+              : (src === "npm" && compareSemver(lat, cur) > 0);
+            res = { ok: true, result: { currentVersion: cur, latestVersion: lat, hasUpdate, source: src } };
+          } else {
+            const fetchOpts = abortController ? { signal: abortController.signal } : undefined;
+            const registryUrl = this.getRegistryUrl();
+            const registryParam = encodeURIComponent(registryUrl);
+            try {
+              res = await fetchApi("/update/check?registry=" + registryParam, fetchOpts);
+            } catch (fetchErr) {
+              if (abortController?.signal?.aborted || fetchErr.name === "AbortError" || fetchErr.message?.includes("超时")) {
+                throw new Error("检查更新超时");
+              }
+              try {
+                const base = registryUrl.endsWith("/") ? registryUrl : registryUrl + "/";
+                const npmRes = await fetch(base + "dsh-session-manager/latest", fetchOpts);
+                if (npmRes.ok) {
+                  const npmData = await npmRes.json();
+                  if (npmData && npmData.version) {
+                    const cur = this.state.currentVersion;
+                    const lat = npmData.version;
+                    const hasUpdate = compareSemver(lat, cur) > 0;
+                    res = { ok: true, result: { currentVersion: cur, latestVersion: lat, hasUpdate, source: "npm" } };
+                  }
+                }
+              } catch (_) {
+                if (abortController?.signal?.aborted || fetchErr.name === "AbortError" || fetchErr.message?.includes("超时")) {
+                  throw new Error("检查更新超时");
+                }
+              }
+              if (!res) throw fetchErr;
+            }
+          }
+
+          if (!res || !res.ok) {
+            throw new Error(res?.error || "检查更新失败");
+          }
+
+          const result = res.result || {};
+          const runningVersion = result.runningVersion || result.currentVersion || this.state.runningVersion || CURRENT_VERSION;
+          const installedVersion = result.installedVersion || (this.state.installedVersion && compareSemver(this.state.installedVersion, runningVersion) > 0 ? this.state.installedVersion : runningVersion);
+          const latestVersion = result.latestVersion || installedVersion;
+          const source = result.source || "npm";
+          const hasUpdate = typeof result.hasUpdate === "boolean" ? result.hasUpdate : compareSemver(latestVersion, installedVersion) > 0;
+
+          this.state.runningVersion = runningVersion;
+          this.state.currentVersion = runningVersion;
+          this.state.installedVersion = installedVersion;
+          this.state.latestVersion = latestVersion;
+          this.state.source = source;
+          this.state.channelSwitch = result.channelSwitch || null;
+          const now = Date.now();
+          this.state.checkedAt = now;
+          this.state.lastAttemptAt = now;
+          this.lastFailedAt = null;
+
+          if (source === "linked") {
+            this.state.notes = "update.source.linked";
+            this.state.status = "idle";
+          } else if (source === "github" && !hasUpdate) {
+            this.state.notes = "update.source.github";
+            this.state.status = "idle";
+          } else if (source === "installation") {
+            this.state.notes = "update.source.installation";
+            this.state.status = "idle";
+          } else if (source === "unknown") {
+            this.state.notes = "update.source.unknown";
+            this.state.status = "idle";
+          } else if (compareSemver(installedVersion, runningVersion) > 0) {
+            this.state.status = "done";
+            this.state.application = "restart-required";
+            this.state.notes = null;
+            if (shouldOpenDialog) {
+              this.state.dialogOpen = true;
+            }
+          } else if (hasUpdate) {
+            this.state.status = "available";
+            this.state.notes = null;
+            if (openOnFound && !silent) {
+              this.state.dialogOpen = true;
+            }
+          } else {
+            this.state.status = "idle";
+            this.state.notes = null;
+            if (shouldOpenDialog) {
+              this.state.dialogOpen = true;
+            }
+          }
+          this._notify();
+          return this.state;
+        } catch (err) {
+          const now = Date.now();
+          this.state.status = "error";
+          this.state.error = (abortController?.signal?.aborted ? "检查更新超时" : (err.message || "检查更新失败"));
+          this.state.lastAttemptAt = now;
+          this.lastFailedAt = now;
+          if (shouldOpenDialog) {
+            this.state.dialogOpen = true;
+          }
+          this._notify();
+          return this.state;
+        } finally {
+          if (timeoutTimer) clearTimeout(timeoutTimer);
+        }
+      },
+      async startUpdate(options = {}) {
+        const { openDialog = true } = options;
+        if (this.state.status === "updating") return this.state;
+        this.state.status = "updating";
+        this.state.error = null;
+        if (openDialog) {
+          this.state.dialogOpen = true;
+        }
+        this._notify();
+
+        const targetVersion = this.state.latestVersion || "latest";
+        const spec = "dsh-session-manager@" + targetVersion;
+        const registryUrl = this.getRegistryUrl();
+        const clientTaskId = "update-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+        let activeTaskId = clientTaskId;
+        this.state.taskId = activeTaskId;
+
+        try {
+          let outcome = null;
+          if (typeof window !== "undefined" && window.__DSH_SM_TEST_UPDATE__) {
+            const testOverride = window.__DSH_SM_TEST_UPDATE__;
+            if (testOverride.error) {
+              throw new Error(testOverride.error);
+            }
+            if (typeof testOverride.installBundle === "function") {
+              outcome = await testOverride.installBundle(spec);
+            } else {
+              await new Promise(r => setTimeout(r, 100));
+              outcome = { application: testOverride.application || "restart-required" };
+            }
+          } else {
+            let res = null;
+            let shouldPoll = false;
+            let callError = null;
+            try {
+              res = await callApi("/update/install", { version: targetVersion, registry: registryUrl, taskId: clientTaskId });
+            } catch (err) {
+              shouldPoll = true;
+              callError = err;
+            }
+
+            if (res && res.ok) {
+              outcome = res.result;
+            } else if (res && !res.ok) {
+              if (res.code === "update-in-progress" && res.taskId) {
+                // Another update task is already running: adopt its taskId and poll
+                activeTaskId = res.taskId;
+                this.state.taskId = activeTaskId;
+                shouldPoll = true;
+              } else {
+                const errObj = new Error(res.error || "安装更新失败");
+                if (res.rolledBack) {
+                  errObj.rolledBack = true;
+                  errObj.reason = res.error;
+                  errObj.currentVersion = this.state.currentVersion;
+                }
+                throw errObj;
+              }
+            }
+
+            if (shouldPoll) {
+              const pollStart = Date.now();
+              const maxPollMs = (typeof window !== "undefined" && typeof window.__DSH_SM_POLL_TIMEOUT_MS__ === "number")
+                ? window.__DSH_SM_POLL_TIMEOUT_MS__
+                : 90000;
+              let reconciled = false;
+              while (Date.now() - pollStart < maxPollMs) {
+                await new Promise((resolve) => {
+                  const timer = setTimeout(resolve, 1500);
+                  if (typeof timer === "number" && timer === 1) {
+                    Promise.resolve().then(resolve);
+                  }
+                });
+
+                let statusData = null;
+                try {
+                  statusData = await fetchApi("/update/status?taskId=" + encodeURIComponent(activeTaskId));
+                } catch (netErr) {
+                  // Only network or HTTP transport errors during status fetching allow polling retry
+                  continue;
+                }
+
+                if (statusData && statusData.ok && statusData.result) {
+                  const r = statusData.result;
+                  if (r.status === "completed") {
+                    outcome = {
+                      application: r.application || "restart-required",
+                      spec,
+                      version: r.targetVersion || targetVersion,
+                      taskId: activeTaskId,
+                      alreadyInstalled: !!r.alreadyInstalled
+                    };
+                    reconciled = true;
+                    break;
+                  } else if (r.status === "rolled-back" || (r.status === "failed" && r.rolledBack)) {
+                    const rollErr = new Error((r.error || "安装更新失败") + "（已自动恢复旧版本 v" + (r.currentVersion || "") + "）");
+                    rollErr.rolledBack = true;
+                    rollErr.currentVersion = r.currentVersion || this.state.currentVersion;
+                    rollErr.reason = r.error;
+                    throw rollErr;
+                  } else if (r.status === "recovery-required") {
+                    throw new Error("更新失败且自动恢复旧版本失败: " + (r.rollbackError || r.error || "未知原因") + "。请手动重新安装插件。");
+                  } else if (r.status === "failed") {
+                    throw new Error(r.error || "安装更新失败");
+                  } else if (r.status === "superseded") {
+                    throw new Error("更新任务已被其他操作覆盖，请重新检查更新");
+                  }
+                }
+              }
+
+              if (!reconciled) {
+                throw new Error("更新结果尚未确认，请刷新页面或重启 DSH 查看状态");
+              }
+            }
+          }
+
+          const application = outcome?.application || "restart-required";
+          this.state.status = "done";
+          this.state.application = application;
+          this.state.taskId = activeTaskId;
+          const installedV = outcome?.version || targetVersion;
+          this.state.installedVersion = installedV;
+          this.state.latestVersion = installedV;
+          // Running version is NOT modified before restart/reload!
+          this.state.runningVersion = CURRENT_VERSION;
+          this.state.currentVersion = CURRENT_VERSION;
+          this.state.rollbackInfo = null;
+          this.state.error = null;
+          if (openDialog || this.state.dialogOpen) {
+            this.state.dialogOpen = true;
+          }
+          this._notify();
+          return outcome;
+        } catch (err) {
+          this.state.status = "error";
+          if (err.rolledBack) {
+            this.state.rollbackInfo = {
+              rolledBack: true,
+              currentVersion: err.currentVersion || this.state.currentVersion,
+              reason: err.reason || err.message,
+              taskId: activeTaskId
+            };
+            this.state.error = err.message || ("安装更新失败（已自动恢复旧版本 v" + (err.currentVersion || this.state.currentVersion) + "）");
+          } else {
+            this.state.rollbackInfo = null;
+            this.state.error = err.message || "更新安装失败";
+          }
+          if (openDialog || this.state.dialogOpen) {
+            this.state.dialogOpen = true;
+          }
+          this._notify();
+          return { ok: false, error: this.state.error, rolledBack: !!err.rolledBack };
+        }
+      }
+    };
+
+    const panelStore = {
+      open: false,
+      listeners: new Set(),
+      getSnapshot() { return this.open; },
+      subscribe(cb) { this.listeners.add(cb); return () => this.listeners.delete(cb); },
+      set(v) {
+        if (this.open === v) return;
+        this.open = v;
+        if (this.open) {
+          try { updateStore.maybeAutoCheck().catch(() => {}); } catch (_) {}
+        }
+        for (const fn of [...this.listeners]) fn();
+      },
+      toggle() { this.set(!this.open); },
+      // Pending action queued by the title-bar buttons (e.g. 移动至工作区).
+      // The SessionManagerPanel consumes this on mount so it can pre-open
+      // the matching inner dialog (move / delete / migrate) next to itself.
+      pendingMove: null,
+      pendingListeners: new Set(),
+      _emitPending() { for (const fn of [...this.pendingListeners]) fn(); },
+      subscribePending(cb) { this.pendingListeners.add(cb); return () => this.pendingListeners.delete(cb); },
+      setPendingMove(v) { this.pendingMove = v; this._emitPending(); },
+      consumePendingMove() { const v = this.pendingMove; this.pendingMove = null; return v; }
+    };
+    const lastBatchContext = { action: null, ids: [] };
+
+    const DEFAULT_SORT = "updated-desc";
+    const SORT_ORDERS = ["updated-desc", "updated-asc", "created-desc", "created-asc", "name-asc", "name-desc", "priority"];
+    const workspaceValue = (id) => "workspace:" + id;
+    const sessionTime = (value) => {
+      if (typeof value !== "number" && typeof value !== "string") return null;
+      if (typeof value === "string" && value.trim() === "") return null;
+      const time = typeof value === "number" || /^\d+(?:\.\d+)?$/.test(value) ? Number(value) : Date.parse(value);
+      return Number.isFinite(time) ? time : null;
+    };
+    const indexWorkspaces = (workspaces) => {
+      const bySession = new Map();
+      const byPath = new Map();
+      const ids = new Set();
+      for (const workspace of workspaces) {
+        ids.add(workspace.id);
+        const key = pathKey(workspace.path);
+        if (key) {
+          if (!byPath.has(key)) byPath.set(key, new Set());
+          byPath.get(key).add(workspace.id);
+        }
+        for (const id of Array.isArray(workspace.sessionIds) ? workspace.sessionIds : []) {
+          if (!bySession.has(id)) bySession.set(id, new Set());
+          bySession.get(id).add(workspace.id);
+        }
+      }
+      return { bySession, byPath, ids };
+    };
+    const rowWorkspaces = (session, index) => {
+      // Registry membership includes archived sessions and takes precedence
+      // over a stale cwd. Older metadata can fall back to workspaceId/cwd.
+      if (index.bySession.has(session.id)) return index.bySession.get(session.id);
+      if (index.ids.has(session.workspaceId)) return new Set([session.workspaceId]);
+      return index.byPath.get(pathKey(session.cwd)) ?? new Set();
+    };
+
+    function SessionManagerPanel(props) {
+      const t = typeof props.t === "function" ? props.t : (k => k);
+      const open = props.open;
+      const onClose = props.onClose;
+      const onOpen = props.onOpen;
+      const onArchive = props.onArchive;
+      const onUnarchive = props.onUnarchive;
+      const onRemove = props.onRemove;
+      const onMove = props.onMove;
+      const onMigrate = props.onMigrate;
+      const defaultUseSessions = (selector = s => s) => {
+        const model = activeClientCtx?.sessions?.list;
+        return useSyncExternalStore(
+          (cb) => (model?.subscribe ? model.subscribe(cb) : () => {}),
+          () => (model?.getSnapshot ? selector(model.getSnapshot()) : selector({ ids: [], byId: {} })),
+          () => (model?.getSnapshot ? selector(model.getSnapshot()) : selector({ ids: [], byId: {} }))
+        );
+      };
+      const defaultUseWorkspaces = (selector = s => s) => {
+        const model = activeClientCtx?.workspaces?.list;
+        return useSyncExternalStore(
+          (cb) => (model?.subscribe ? model.subscribe(cb) : () => {}),
+          () => (model?.getSnapshot ? selector(model.getSnapshot()) : selector({ items: [] })),
+          () => (model?.getSnapshot ? selector(model.getSnapshot()) : selector({ items: [] }))
+        );
+      };
+      const useSessions = typeof props.useSessions === "function" ? props.useSessions : defaultUseSessions;
+      const useWorkspaces = typeof props.useWorkspaces === "function" ? props.useWorkspaces : defaultUseWorkspaces;
+      const annotations = useAnnotations(true);
+      const marksReady = annotations.loaded && !annotations.error;
+      const updateState = useSyncExternalStore(
+        (cb) => updateStore.subscribe(cb),
+        () => updateStore.getSnapshot(),
+        () => updateStore.getSnapshot()
+      );
+      const [onlyFavorite, setOnlyFavorite] = useState(false);
+      const [onlyReview, setOnlyReview] = useState(false);
+      const [tagFilter, setTagFilter] = useState("all");
+      const [priorityFilter, setPriorityFilter] = useState("all");
+      const [annotationFor, setAnnotationFor] = useState(null);
+      const [annotationAnchor, setAnnotationAnchor] = useState(null);
+      const list = (typeof useSessions === "function" ? useSessions((s) => s) : null) || { ids: [], byId: {} };
+      const workspaceSnapshot = (typeof useWorkspaces === "function" ? useWorkspaces((s) => s) : null) || { items: [] };
+      const archivedIds = workspaceSnapshot.archivedSessionIds || [];
+      const [panelTab, setPanelTab] = useState("sessions");
+      const [wsQuery, setWsQuery] = useState("");
+      const [wsFilter, setWsFilter] = useState("all");
+      const [wsSort, setWsSort] = useState("updated-desc");
+      const [wsSelectedIds, setWsSelectedIds] = useState(() => new Set());
+      const [wsSelectModeEnabled, setWsSelectModeEnabled] = useState(false);
+      const [wsBulkBusy, setWsBulkBusy] = useState(false);
+      const [wsLastClickedRank, setWsLastClickedRank] = useState(null);
+      const archiveVersion = useSyncExternalStore(
+        (cb) => workspaceArchiveStore.subscribe(cb),
+        () => workspaceArchiveStore.getVersion(),
+        () => workspaceArchiveStore.getVersion()
+      );
+      const [filter, setFilter] = useState("all");
+      const [query, setQuery] = useState("");
+      const [workspaceFilter, setWorkspaceFilter] = useState("all");
+      const [sortOrder, setSortOrder] = useState(DEFAULT_SORT);
+      const [busyId, setBusyId] = useState(null);
+      const [error, setError] = useState(null);
+      const [now, setNow] = useState(() => Date.now());
+      const [moveFor, setMoveFor] = useState(null);
+      const [confirmFor, setConfirmFor] = useState(null);
+      const [confirmPreviewState, setConfirmPreviewState] = useState({ loading: false, error: null, subagentCount: 0 });
+      useEffect(() => {
+        if (!confirmFor || !confirmFor.id) {
+          setConfirmPreviewState({ loading: false, error: null, subagentCount: 0 });
+          return;
+        }
+        let alive = true;
+        setConfirmPreviewState({ loading: true, error: null, subagentCount: 0 });
+        fetchApi("/delete-preview?sessionId=" + encodeURIComponent(confirmFor.id))
+          .then((res) => {
+            if (!alive) return;
+            if (res && res.ok && res.result && typeof res.result.subagentCount === "number") {
+              setConfirmPreviewState({ loading: false, error: null, subagentCount: res.result.subagentCount });
+            } else {
+              setConfirmPreviewState({ loading: false, error: res?.error || "获取子智能体预览失败", subagentCount: 0 });
+            }
+          })
+          .catch((err) => {
+            if (!alive) return;
+            setConfirmPreviewState({ loading: false, error: err instanceof Error ? err.message : String(err), subagentCount: 0 });
+          });
+        return () => { alive = false; };
+      }, [confirmFor?.id]);
+      const [workspaces, setWorkspaces] = useState([]);
+      const [createdTimes, setCreatedTimes] = useState({});
+      const [updatedTimes, setUpdatedTimes] = useState({});
+      const [workspacesLoading, setWorkspacesLoading] = useState(true);
+      const [workspacesError, setWorkspacesError] = useState(null);
+      const [workspaceRefresh, setWorkspaceRefresh] = useState(0);
+      const [migrating, setMigrating] = useState(false);
+      const [migrateFor, setMigrateFor] = useState(null);
+      const sessionMembershipKey = useMemo(() => (Array.isArray(list?.ids) ? [...list.ids].sort().join("\0") : ""), [list?.ids]);
+      let isSessionWorkspaceArchived = () => false;
+      // ----- Bulk-action selection state -----
+      const [selectedIds, setSelectedIds] = useState(() => new Set());
+      const [lastClickedRank, setLastClickedRank] = useState(null);
+      const [bulkPreview, setBulkPreview] = useState(null);
+      const [bulkProgress, setBulkProgress] = useState(null);
+      const [bulkResult, setBulkResult] = useState(null);
+      const [bulkBusy, setBulkBusy] = useState(false);
+      const [bulkTagDraft, setBulkTagDraft] = useState(null);
+      // Select-mode is the user-controlled switch that reveals the row
+      // checkboxes and the bulk action bar. It lives outside selectedIds
+      // so the row checkboxes can be visible even before anything is
+      // ticked (otherwise the BulkActionBar's own "select all" button
+      // is unreachable).
+      const [selectModeEnabled, setSelectModeEnabled] = useState(false);
+      // Closing the panel resets everything bulk-related.
+      useEffect(() => {
+        if (!open) {
+          setSelectedIds(new Set());
+          setLastClickedRank(null);
+          setBulkPreview(null);
+          setBulkProgress(null);
+          setBulkResult(null);
+          setBulkTagDraft(null);
+          setBulkPresetDraft(null);
+          setBulkPresetOptions([]);
+          setBulkBusy(false);
+          setSelectModeEnabled(false);
+          setWsSelectedIds(new Set());
+          setWsSelectModeEnabled(false);
+          setWsBulkBusy(false);
+          setWsLastClickedRank(null);
+        }
+      }, [open]);
+      const toggleSelectMode = () => {
+        setSelectModeEnabled(value => {
+          if (value) clearSelection();
+          return !value;
+        });
+      };
+      const toggleSelect = (id, shift, currentIndex) => {
+        setSelectedIds(prev => {
+          const next = new Set(prev);
+          if (shift && lastClickedRank !== null && Number.isInteger(currentIndex)) {
+            const lo = Math.min(lastClickedRank, currentIndex);
+            const hi = Math.max(lastClickedRank, currentIndex);
+            const allInRange = rows.slice(lo, hi + 1).every(r => next.has(r.id));
+            for (let i = lo; i <= hi; i++) {
+              const rowId = rows[i] && rows[i].id;
+              if (!rowId) continue;
+              if (allInRange) next.delete(rowId); else next.add(rowId);
+            }
+          } else {
+            if (next.has(id)) next.delete(id); else next.add(id);
+          }
+          return next;
+        });
+        if (!shift) setLastClickedRank(Number.isInteger(currentIndex) ? currentIndex : null);
+      };
+      // Clear the selected-id set without touching selectModeEnabled.
+      // Earlier this also reset selectModeEnabled to false, which made
+      // clicking the "清空选择" toolbar button silently exit bulk
+      // mode. Bulk mode is now exited exclusively by toggleSelectMode()
+      // (the "退出批量处理" toggle button in the toolbar).
+      const clearSelection = () => { setSelectedIds(new Set()); setLastClickedRank(null); };
+      const selectAllFiltered = () => {
+        if (rows.length > 200) { setError(t("bulk.error.tooMany")); return; }
+        setSelectedIds(new Set(rows.map(r => r.id)));
+      };
+      const selectedSessions = useMemo(() => {
+        const out = [];
+        for (const id of selectedIds) {
+          const s = list.byId[id];
+          if (!s) continue;
+          out.push({ id, displayTitle: s.blank ? t("panel.session.new") : (s.displayTitle || id) });
+        }
+        return out;
+      }, [selectedIds, list.byId, t]);
+      const executeBulk = async ({ action, payload, actionLabel, ids, sessions }) => {
+        if (ids.length === 0) return;
+        if (ids.length > 200) { setError(t("bulk.error.tooMany")); return; }
+        const cancelController = { aborted: false, abort() { this.aborted = true; } };
+        setBulkProgress({ action, actionLabel, done: 0, total: ids.length, completed: false, cancel: () => cancelController.abort() });
+        setBulkBusy(true);
+        let result;
+        try {
+          // Archive/unarchive reject or accept per session through DSH's own
+          // client-state command, so a bulk run drives exactly the same command
+          // as the single-row buttons: the sidebar updates per reply, pins are
+          // dropped by DSH, and a rejected archive (for example an active
+          // session, which the host reports as workspace/session-active) becomes
+          // a failed item instead of a registry write that only disk agrees with.
+          if ((action === "archive" || action === "unarchive") && hasWorkspaceCommand(action)) {
+            const items = [];
+            let processed = 0;
+            for (const [index, id] of ids.entries()) {
+              if (cancelController.aborted) break;
+              try { items.push(await runArchiveCommand(action, id)); }
+              catch (error) { items.push({ sessionId: id, status: "failed", error: error instanceof Error ? error.message : String(error) }); }
+              processed++;
+              setBulkProgress(prev => prev ? { ...prev, done: index + 1, completed: false } : prev);
+            }
+            if (cancelController.aborted) {
+              for (let i = processed; i < ids.length; i++) {
+                items.push({ sessionId: ids[i], status: "skipped", reason: "aborted" });
+              }
+            }
+            const success = items.filter(item => item.status === "success").length;
+            const skipped = items.filter(item => item.status === "skipped").length;
+            const failed = items.length - success - skipped;
+            result = {
+              summary: { total: ids.length, success, failed, skipped },
+              items,
+              aborted: cancelController.aborted
+            };
+          } else {
+            result = await runBatch({ action, sessionIds: ids, payload }, ({ done }) => {
+              setBulkProgress(prev => prev ? { ...prev, done, completed: false } : prev);
+            });
+          }
+        } catch (error) {
+          setBulkProgress(null);
+          setBulkBusy(false);
+          setError(error instanceof Error ? error.message : String(error));
+          return;
+        }
+        const items = (result.items || []).map(item => {
+          const session = sessions.find(s => s.id === item.sessionId);
+          return { ...item, displayTitle: session ? session.displayTitle : (item.sessionId || "—") };
+        });
+        setBulkProgress(null);
+        setBulkResult({ action, actionLabel, items });
+        setBulkBusy(false);
+        lastBatchContext.action = action;
+        lastBatchContext.ids = ids;
+        try { await annotationStore.load(true); } catch (_) { /* ignore */ }
+        if (typeof props.onRefreshAfterBulk === "function") {
+          try { await props.onRefreshAfterBulk(action); } catch (_) { /* ignore */ }
+        }
+      };
+      const runBulk = ({ action, payload, actionLabel, needsConfirm }) => {
+        if (bulkBusy) return;
+        const ids = [...selectedIds];
+        if (ids.length === 0) return;
+        if (ids.length > 200) { setError(t("bulk.error.tooMany")); return; }
+        const sessions = selectedSessions;
+        if (action === "unarchive") {
+          const hasBlocked = sessions.some(s => isSessionWorkspaceArchived(s));
+          if (hasBlocked) {
+            if (typeof window !== "undefined" && typeof window.alert === "function") {
+              window.alert(t("error.workspaceArchived"));
+            }
+            return;
+          }
+        }
+        const resolvedLabel = actionLabel || ({
+          archive: t("bulk.archive"), unarchive: t("bulk.unarchive"), delete: t("bulk.delete"),
+          move: t("bulk.move"), "preset-migrate": t("bulk.presetMigrate"),
+          favorite: t("bulk.favorite"), unfavorite: t("bulk.unfavorite"),
+          review: t("bulk.review"), unreview: t("bulk.unreview"),
+          "add-tags": t("bulk.tagsAdd"), "remove-tags": t("bulk.tagsRemove"),
+          "set-priority": t("bulk.priority")
+        })[action] || action;
+        const actionSummaryMap = {
+          delete: t("bulk.delete.actionText"),
+          move: t("bulk.move.actionText"),
+          "preset-migrate": t("bulk.presetMigrate.actionText"),
+          "set-priority": t("bulk.priority.actionText"),
+          "add-tags": t("bulk.tagsAdd.actionText"),
+          "remove-tags": t("bulk.tagsRemove.actionText"),
+          archive: t("bulk.archive.actionText"),
+          unarchive: t("bulk.unarchive.actionText"),
+          favorite: t("bulk.favorite.actionText"),
+          unfavorite: t("bulk.unfavorite.actionText"),
+          review: t("bulk.review.actionText"),
+          unreview: t("bulk.unreview.actionText")
+        };
+        const summaryAction = actionSummaryMap[action] || resolvedLabel;
+        if (needsConfirm) {
+          const baseWarning = action === "delete" ? t("bulk.dialog.warning.delete") : "";
+          if (action === "delete") {
+            setBulkPreview({
+              action,
+              payload,
+              actionLabel: summaryAction,
+              sessions,
+              warning: baseWarning,
+              loading: true,
+              error: null
+            });
+            fetchApi("/delete-preview?sessionIds=" + encodeURIComponent(ids.join(",")))
+              .then((res) => {
+                if (res && res.ok && res.result && typeof res.result.subagentCount === "number") {
+                  const subCount = res.result.subagentCount;
+                  setBulkPreview((prev) => {
+                    if (!prev || prev.action !== "delete") return prev;
+                    const subText = subCount > 0 ? t("confirm.delete.subagents", { count: subCount }) : "";
+                    return {
+                      ...prev,
+                      loading: false,
+                      error: null,
+                      warning: subText ? `${subText}\n${baseWarning}` : baseWarning
+                    };
+                  });
+                } else {
+                  const errMsg = (res && res.error) || t("confirm.delete.previewError") || "检查关联子智能体会话失败，请稍后重试";
+                  setBulkPreview((prev) => {
+                    if (!prev || prev.action !== "delete") return prev;
+                    return {
+                      ...prev,
+                      loading: false,
+                      error: errMsg,
+                      warning: `${errMsg}\n${baseWarning}`
+                    };
+                  });
+                }
+              })
+              .catch((err) => {
+                const errMsg = (err && err.message) || t("confirm.delete.previewError") || "检查关联子智能体会话失败，请稍后重试";
+                setBulkPreview((prev) => {
+                  if (!prev || prev.action !== "delete") return prev;
+                  return {
+                    ...prev,
+                    loading: false,
+                    error: errMsg,
+                    warning: `${errMsg}\n${baseWarning}`
+                  };
+                });
+              });
+            return;
+          }
+          setBulkPreview({ action, payload, actionLabel: summaryAction, sessions, warning: baseWarning });
+          return;
+        }
+        void executeBulk({ action, payload, actionLabel: resolvedLabel, ids, sessions });
+      };
+      const retryFailedBulk = (failedIds, action, payload, actionLabel) => {
+        setBulkResult(null);
+        const filtered = (failedIds || []).filter(id => typeof id === "string" && id !== "");
+        setSelectedIds(new Set(filtered));
+        if (filtered.length === 0) return;
+        const needsConfirm = action === "delete" || action === "move" || action === "preset-migrate" || action === "add-tags" || action === "remove-tags" || action === "set-priority";
+        runBulk({ action, payload, actionLabel, needsConfirm });
+      };
+      const needsConfirmFor = (action) => action === "delete";
+      const onBulkAction = (action, payload, forceNeedsConfirm) => {
+        // Toggle: if a preview or result dialog is already open for this
+        // same action, click the button again to close it.
+        if (bulkPreview && bulkPreview.action === action) { setBulkPreview(null); return; }
+        if (bulkResult && bulkResult.action === action) { setBulkResult(null); return; }
+        const needsConfirm = forceNeedsConfirm === true || needsConfirmFor(action);
+        runBulk({ action, payload, needsConfirm });
+      };
+      const onBulkSelectAll = () => { setSelectModeEnabled(true); selectAllFiltered(); };
+      const onBulkClear = () => clearSelection();
+      const onBulkTagsAdd = () => { if (bulkTagDraft && bulkTagDraft.mode === "add") { setBulkTagDraft(null); return; } setBulkTagDraft({ mode: "add" }); };
+      const onBulkRemoveAllTags = () => onBulkAction("remove-tags", { tags: [] });
+      const onBulkPriority = () => { if (bulkTagDraft && bulkTagDraft.mode === "priority") { setBulkTagDraft(null); return; } setBulkTagDraft({ mode: "priority" }); };
+      const onBulkMove = () => { if (bulkTagDraft && bulkTagDraft.mode === "move") { setBulkTagDraft(null); return; } setBulkTagDraft({ mode: "move" }); };
+      const onBulkTagApply = (tags) => {
+        const mode = bulkTagDraft && bulkTagDraft.mode;
+        setBulkTagDraft(null);
+        if (mode === "add") onBulkAction("add-tags", { tags }, false);
+      };
+      const onBulkPriorityApply = (value) => {
+        const priority = Number(value);
+        setBulkTagDraft(null);
+        if (Number.isInteger(priority) && priority >= 1 && priority <= 5) onBulkAction("set-priority", { priority }, false);
+      };
+      const onBulkMoveApply = (value) => {
+        setBulkTagDraft(null);
+        if (value) onBulkAction("move", { targetWorkspaceId: value }, false);
+      };
+      const [bulkPresetDraft, setBulkPresetDraft] = useState(null);
+      const [bulkPresetOptions, setBulkPresetOptions] = useState([]);
+      const onBulkPreset = () => {
+        if (selectedIds.size === 0) return;
+        // Toggle: close the dialog if it is already open.
+        if (bulkPresetDraft) { setBulkPresetDraft(null); return; }
+
+        // Scan using the first selected session; /preset-scan returns
+        // the global available preset list regardless of session, so any
+        // selected id works.
+        const firstId = [...selectedIds][0];
+        setBulkPresetDraft({ mode: "preset" });
+        setBulkPresetOptions([]);
+        fetchApi("/preset-scan?sessionId=" + encodeURIComponent(firstId)).then((data) => {
+          if (!data || !data.ok) return;
+          const result = data.result || {};
+          const presets = Array.isArray(result.availablePresets)
+            ? result.availablePresets
+            : (result.rows && Array.isArray(result.rows.availablePresets) ? result.rows.availablePresets : []);
+          setBulkPresetOptions(presets.filter(p => typeof p === "string" && p.length > 0).map(p => ({ value: p, label: p })));
+        }).catch(() => { /* surface empty list */ });
+      };
+      const onBulkPresetApply = (value) => {
+        setBulkPresetDraft(null);
+        if (value) onBulkAction("preset-migrate", { toPreset: value }, false);
+      };
+      const bulkMoveOptions = useMemo(() => workspaces.map(ws => ({ value: ws.id, label: ws.title || ws.name || ws.id })), [workspaces]);
+      const bulkPriorityOptions = useMemo(() => [1, 2, 3, 4, 5].map(value => ({ value: String(value), label: t("marks.priority." + value) })), [t]);
+      useEffect(() => {
+        const timer = setInterval(() => setNow(Date.now()), 30000);
+        return () => clearInterval(timer);
+      }, []);
+      useEffect(() => {
+        if (!open) return;
+        let alive = true;
+        const controller = new AbortController();
+        if (workspaces.length === 0) setWorkspacesLoading(true);
+        setWorkspacesError(null);
+        fetchApi("/workspaces", { signal: controller.signal }).then((data) => {
+          if (!data?.ok || !Array.isArray(data.result?.workspaces)) throw new Error(data?.error || "Invalid workspace response");
+          const next = data.result.workspaces.filter(workspace => workspace && typeof workspace.id === "string");
+          if (!alive) return;
+          if (data.result.workspaceArchives) {
+            workspaceArchiveStore.syncFromHost(data.result.workspaceArchives);
+          }
+          setWorkspaces(next);
+          const times = data.result.sessionCreatedAt;
+          setCreatedTimes(times && typeof times === "object" && !Array.isArray(times) ? times : {});
+          const updated = data.result.sessionUpdatedAt;
+          setUpdatedTimes(updated && typeof updated === "object" && !Array.isArray(updated) ? updated : {});
+          setWorkspaceFilter(value => value.startsWith("workspace:") && !next.some(workspace => workspaceValue(workspace.id) === value) ? "all" : value);
+        }).catch(error => {
+          if (alive) setWorkspacesError(error instanceof Error ? error.message : String(error));
+        }).finally(() => {
+          if (alive) setWorkspacesLoading(false);
+        });
+        return () => { alive = false; controller.abort(); };
+      }, [open, workspaceSnapshot, Boolean(moveFor), workspaceRefresh, sessionMembershipKey]);
+      // Drain any pending action queued by a header button. The panel is
+      // the single owner of every inner dialog, so opening it with a
+      // pending action pre-populates the corresponding dialog state.
+      useEffect(() => {
+        if (!open) return;
+        const pending = panelStore.consumePendingMove();
+        if (pending && pending.sessionId) {
+          setMoveFor({ id: pending.sessionId, displayTitle: pending.displayTitle || pending.sessionId, workspaceId: pending.workspaceId || "" });
+        }
+      }, [open]);
+      const archived = useMemo(() => new Set(archivedIds), [archivedIds]);
+      const workspaceIndex = useMemo(() => indexWorkspaces(workspaces), [workspaces]);
+      isSessionWorkspaceArchived = (session) => {
+        if (!session) return false;
+        if (session.workspaceId && workspaceArchiveStore.isArchived(session.workspaceId)) return true;
+        const memberships = rowWorkspaces(session, workspaceIndex);
+        for (const wsId of memberships) {
+          if (workspaceArchiveStore.isArchived(wsId)) return true;
+        }
+        for (const [, rec] of workspaceArchiveStore.getAllRecords()) {
+          if (rec.archived === true && Array.isArray(rec.sessionIds) && rec.sessionIds.includes(session.id)) {
+            return true;
+          }
+        }
+        return false;
+      };
+      const allRows = useMemo(() => {
+        const ids = Array.isArray(list?.ids) ? list.ids : [];
+        const byId = list?.byId || {};
+        return ids.map(id => byId[id])
+          .filter(session => session != null && session.origin !== "subagent" && (!session.blank || session.id === list?.current));
+      }, [list]);
+      const availableTags = useMemo(() => {
+        const tags = new Map();
+        for (const session of allRows) for (const tag of annotationOf(annotations, session.id).tags) if (!tags.has(tag.toLowerCase())) tags.set(tag.toLowerCase(), tag);
+        return [...tags].sort((a, b) => a[1].localeCompare(b[1]));
+      }, [allRows, annotations.entries]);
+      useEffect(() => {
+        // A removed last tag must not leave an invisible active filter while
+        // the select falls back to displaying "All tags".
+        if (annotations.loaded && !annotations.error && tagFilter.startsWith("tag:")
+          && !availableTags.some(([key]) => key === tagFilter.slice(4))) setTagFilter("all");
+      }, [availableTags, tagFilter, annotations.loaded, annotations.error]);
+      const rows = useMemo(() => {
+        const needle = query.trim().toLowerCase();
+        const selected = allRows.filter(session => {
+          if (filter === "active" && archived.has(session.id)) return false;
+          if (filter === "archived" && !archived.has(session.id)) return false;
+          const mark = annotationOf(annotations, session.id);
+          if (onlyFavorite && !mark.favorite || onlyReview && !mark.reviewLater) return false;
+          if (tagFilter === "none" && mark.tags.length !== 0) return false;
+          if (tagFilter.startsWith("tag:") && !mark.tags.some(tag => tag.toLowerCase() === tagFilter.slice(4))) return false;
+          if (priorityFilter !== "all" && (mark.priority ?? 3) !== Number(priorityFilter)) return false;
+          const title = session.blank ? t("panel.session.new") : session.displayTitle || session.id;
+          if (needle && ![title, session.id, mark.note, ...mark.tags].some(value => value.toLowerCase().includes(needle))) return false;
+          if (workspaceFilter !== "all") {
+            const memberships = rowWorkspaces(session, workspaceIndex);
+            if (workspaceFilter === "ungrouped" ? memberships.size !== 0 : !memberships.has(workspaceFilter.slice("workspace:".length))) return false;
+          }
+          return true;
+        });
+        if (sortOrder.startsWith("name-")) {
+          const dir = sortOrder === "name-asc" ? 1 : -1;
+          const nameOf = s => (s.blank ? t("panel.session.new") : (s.displayTitle || s.id || "")).toLowerCase();
+          return selected.map((session, rank) => ({ session, rank, name: nameOf(session) }))
+            .sort((a, b) => {
+              const cmp = a.name.localeCompare(b.name);
+              return cmp !== 0 ? dir * cmp : a.rank - b.rank;
+            })
+            .map(item => item.session);
+        }
+        const field = sortOrder.startsWith("created-") ? "createdAt" : "updatedAt";
+        const direction = sortOrder === "priority" || sortOrder.endsWith("-asc") ? 1 : -1;
+        // Sort a derived array only. Equal timestamps preserve source order;
+        // missing/invalid timestamps stay last in either direction. Priority
+        // is normalized to 1-5 (legacy null treated as 3) so unset rows sort
+        // alongside priority 3.
+        const timeFor = session => {
+          if (sortOrder === "priority") return annotationOf(annotations, session.id).priority ?? 3;
+          return field === "createdAt" ? sessionTime(session.createdAt) ?? sessionTime(createdTimes[session.id]) : sessionTime(session.updatedAt);
+        };
+        return selected.map((session, rank) => ({ session, rank, time: timeFor(session) }))
+          .sort((a, b) => a.time === b.time ? a.rank - b.rank : a.time === null ? 1 : b.time === null ? -1 : direction * (a.time - b.time))
+          .map(item => item.session);
+      }, [allRows, archived, filter, query, workspaceFilter, workspaceIndex, sortOrder, createdTimes, annotations.entries, onlyFavorite, onlyReview, tagFilter, priorityFilter, t]);
+      // The set of ids that survive the current filter; bulk-selection
+      // bookkeeping reads from this so it stays in sync with row visibility.
+      const currentFilterIds = useMemo(() => rows.map(r => r.id), [rows]);
+      const currentFilterRank = useMemo(() => {
+        const m = new Map();
+        rows.forEach((r, i) => m.set(r.id, i));
+        return m;
+      }, [rows]);
+      // Drop ids from the selection that no longer match the current filter
+      // (e.g. user narrowed the workspace filter or hid archived rows).
+      useEffect(() => {
+        const allowed = new Set(currentFilterIds);
+        setSelectedIds(prev => {
+          let changed = false;
+          const next = new Set();
+          for (const id of prev) if (allowed.has(id)) next.add(id); else changed = true;
+          return changed ? next : prev;
+        });
+      }, [currentFilterIds]);
+      const creationTimeUnavailable = sortOrder.startsWith("created-") && allRows.length > 0
+        && !allRows.some(session => (sessionTime(session.createdAt) ?? sessionTime(createdTimes[session.id])) !== null);
+      const runRow = async (sessionId, fn) => {
+        if (busyId !== null) return;
+        setBusyId(sessionId);
+        setError(null);
+        try {
+          await fn();
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e));
+        } finally {
+          setBusyId(null);
+        }
+      };
+      const filterBtn = (id, label) => h("button", {
+        type: "button",
+        key: id,
+        className: "sm-filterBtn" + (filter === id ? " sm-on" : ""),
+        "aria-pressed": filter === id,
+        onClick: () => setFilter(id)
+      }, label);
+      const hasViewChanges = query !== "" || filter !== "all" || workspaceFilter !== "all" || sortOrder !== DEFAULT_SORT || onlyFavorite || onlyReview || tagFilter !== "all" || priorityFilter !== "all";
+      const resetView = () => {
+        setQuery("");
+        setFilter("all");
+        setWorkspaceFilter("all");
+        setSortOrder(DEFAULT_SORT);
+        setOnlyFavorite(false);
+        setOnlyReview(false);
+        setTagFilter("all");
+        setPriorityFilter("all");
+      };
+      const renderRow = (s, rank) => {
+        const isArchived = archived.has(s.id);
+        const isCurrent = s.id === list.current;
+        const busy = busyId === s.id;
+        const mark = annotationOf(annotations, s.id);
+        const isSelected = selectedIds.has(s.id);
+        const isWsArchived = isSessionWorkspaceArchived(s);
+        const checkbox = (selectedIds.size === 0 && !selectModeEnabled)
+          ? null
+          : h("label", { className: "sm-bulkRowCheckbox", onClick: (e) => e.stopPropagation() },
+              h("input", {
+                type: "checkbox",
+                checked: isSelected,
+                disabled: busy || bulkBusy,
+                "aria-label": t("bulk.checkbox.aria", { title: s.displayTitle || s.id }),
+                onChange: (e) => toggleSelect(s.id, e.shiftKey === true, rank)
+              })
+            );
+        return h("div", {
+          key: s.id,
+          "data-session-id": s.id,
+          className: "sm-row" + (isCurrent ? " sm-rowCurrent" : "") + (isSelected ? " sm-rowBulkSelected" : "")
+        },
+          h("div", { className: "sm-rowCheckboxSlot" + ((selectedIds.size > 0 || selectModeEnabled) ? " sm-rowCheckboxSlot-visible" : "") }, checkbox),
+          h("div", { className: "sm-rowMain" },
+            h("div", { className: "sm-rowTitle" },
+              h("span", null, s.blank ? t("panel.session.new") : (s.displayTitle || s.id)),
+              isWsArchived ? h("span", { className: "sm-badge sm-badgeWorkspaceArchived" }, t("panel.workspaceArchived")) : null,
+              isArchived ? h("span", { className: "sm-badge sm-badgeArchived" }, t("panel.archived")) : null,
+              s.running ? h("span", { className: "sm-badge sm-badgeRunning" }, t("panel.running")) : null,
+              isCurrent ? h("span", { className: "sm-badge sm-badgeCurrent" }, t("panel.current")) : null
+            ),
+            h("div", { className: "sm-rowSecondary" },
+              h("div", { className: "sm-rowBadges" },
+                h("span", { className: "sm-priorityBadge sm-priority-" + (mark.priority ?? 3), title: t("marks.priority." + (mark.priority ?? 3)) }, "P" + (mark.priority ?? 3)),
+                mark.tags.slice(0, 2).map(tag => h("button", { key: tag, type: "button", className: "sm-tagChip", title: tag, onClick: () => setTagFilter("tag:" + tag.toLowerCase()) }, tag)),
+                mark.tags.length > 2 ? h("span", { title: mark.tags.join(", ") }, "+" + (mark.tags.length - 2)) : null,
+                mark.note ? h("button", { type: "button", className: "sm-noteBadge", title: t("marks.note.exists"), onClick: () => { setAnnotationAnchor(null); setAnnotationFor(current => current?.id === s.id ? null : s); } }, "✎") : null
+              ),
+              h("div", { className: "sm-rowMeta" }, shortPath(s.cwd) + (s.cwd ? " · " : "") + formatRelative(s.updatedAt, now)),
+              h("div", { className: "sm-rowActions" },
+                h("button", { type: "button", className: "sm-rowBtn", disabled: busy, onClick: () => { if (isArchived) { if (isWsArchived) { if (typeof window !== "undefined" && typeof window.alert === "function") { window.alert(t("error.workspaceArchived")); } return; } /* DSH refuses to surface an archived session as the current view: clicking "Open" on an archived row flashes an empty chat panel and bounces back to "no session selected". Unarchive first, then open. (issue #17.4) */ runRow(s.id, async () => { await onUnarchive(s.id); await onOpen(s.id); }); } else { onOpen(s.id); } } }, t("row.open")),
+                renderTip(t(isArchived ? "row.unarchive" : "row.archive"), h("button", {
+                  type: "button",
+                  className: "sm-rowBtn sm-rowBtnIcon" + (isArchived ? " sm-rowBtnActive" : ""),
+                  disabled: busy,
+                  "aria-label": t(isArchived ? "row.unarchive" : "row.archive") + ": " + (s.displayTitle || s.id),
+                  onClick: () => runRow(s.id, () => {
+                    if (isArchived) {
+                      if (isWsArchived) {
+                        if (typeof window !== "undefined" && typeof window.alert === "function") {
+                          window.alert(t("error.workspaceArchived"));
+                        }
+                        return;
+                      }
+                      return onUnarchive(s.id);
+                    }
+                    return onArchive(s.id);
+                  })
+                },
+                  h("span", { className: "sm-headerBtnIcon" }, HeaderArchiveIcon({ unarchive: isArchived })),
+                  h("span", { className: "sm-rowBtnLabel" }, t(isArchived ? "row.unarchive" : "row.archive"))
+                )),
+                annotationButtons(s.id, s.displayTitle || s.id, t, annotations, "sm-rowBtn", patch => runRow(s.id, () => annotationStore.save(s.id, patch)), () => { setAnnotationAnchor(null); setAnnotationFor(current => current?.id === s.id ? null : s); }, busy),
+                renderTip(t("row.move"), h("button", {
+                  type: "button",
+                  className: "sm-rowBtn sm-rowBtnIcon" + (moveFor && moveFor.id === s.id ? " sm-rowBtnActive" : ""),
+                  disabled: busy,
+                  "aria-label": t("row.move") + ": " + (s.displayTitle || s.id),
+                  onClick: () => { if (moveFor && moveFor.id === s.id) setMoveFor(null); else setMoveFor(s); }
+                },
+                  h("span", { className: "sm-headerBtnIcon" }, HeaderMoveIcon()),
+                  h("span", { className: "sm-rowBtnLabel" }, t("row.move"))
+                )),
+                h("button", { type: "button", className: "sm-rowBtn", disabled: busy, onClick: () => { if (migrateFor && migrateFor.id === s.id) setMigrateFor(null); else setMigrateFor(s); } }, t("row.migrate")),
+                renderTip(t("row.delete"), h("button", {
+                  type: "button",
+                  className: "sm-rowBtn sm-rowBtnDanger sm-rowBtnIcon" + (confirmFor && confirmFor.id === s.id ? " sm-rowBtnActive" : ""),
+                  disabled: busy,
+                  "aria-label": t("row.delete") + ": " + (s.displayTitle || s.id),
+                  onClick: () => { if (confirmFor && confirmFor.id === s.id) setConfirmFor(null); else setConfirmFor(s); }
+                },
+                  h("span", { className: "sm-headerBtnIcon" }, HeaderTrashIcon()),
+                  h("span", { className: "sm-rowBtnLabel" }, t("row.delete"))
+                ))
+              )
+            )
+          )
+        );
+      };
+      const rowsList = rows.length === 0
+        ? h("div", { className: "sm-empty" }, allRows.length > 0 ? t("panel.empty.filtered") : filter === "archived" ? t("panel.empty.archived") : t("panel.empty"))
+        : h("div", { className: "sm-list" }, rows.map((s, i) => renderRow(s, i)));
+
+      const allWorkspaceRows = useMemo(() => {
+        const hasSessionList = Array.isArray(list?.ids);
+        const sessionsByWorkspace = new Map();
+        for (const ws of workspaces) {
+          sessionsByWorkspace.set(ws.id, []);
+        }
+        if (hasSessionList) {
+          for (const s of allRows) {
+            const matchedWsIds = rowWorkspaces(s, workspaceIndex);
+            for (const wsId of matchedWsIds) {
+              const wsList = sessionsByWorkspace.get(wsId);
+              if (wsList) wsList.push(s);
+            }
+          }
+        }
+        return workspaces.map(ws => {
+          const wsSessions = sessionsByWorkspace.get(ws.id) || [];
+          let sessionCount = 0;
+          let latestSessionTime = null;
+          if (hasSessionList) {
+            sessionCount = wsSessions.length;
+            for (const s of wsSessions) {
+              const st = sessionTime(s?.updatedAt) ?? sessionTime(s?.createdAt);
+              if (st !== null) {
+                if (latestSessionTime === null || st > latestSessionTime) {
+                  latestSessionTime = st;
+                }
+              }
+            }
+          } else {
+            const sids = Array.isArray(ws.sessionIds) ? ws.sessionIds : [];
+            const byId = list?.byId || {};
+            for (const sid of sids) {
+              const s = byId[sid];
+              if (s && (s.origin === "subagent" || (s.blank && s.id !== list?.current))) continue;
+              sessionCount++;
+              const st = sessionTime(s?.updatedAt) ?? sessionTime(s?.createdAt);
+              if (st !== null) {
+                if (latestSessionTime === null || st > latestSessionTime) {
+                  latestSessionTime = st;
+                }
+              }
+            }
+          }
+          return {
+            ...ws,
+            sessionCount,
+            latestUpdatedAt: latestSessionTime
+          };
+        });
+      }, [workspaces, allRows, workspaceIndex, list?.ids, list?.byId, list?.current]);
+
+      const filteredWorkspaceRows = useMemo(() => {
+        const needle = wsQuery.trim().toLowerCase();
+        const selected = allWorkspaceRows.filter(ws => {
+          const isArchived = workspaceArchiveStore.isArchived(ws.id);
+          if (wsFilter === "active" && isArchived) return false;
+          if (wsFilter === "archived" && !isArchived) return false;
+          if (needle) {
+            const title = ws.title || ws.name || ws.id;
+            const path = ws.path || "";
+            const matchesTitle = title.toLowerCase().includes(needle);
+            const matchesPath = path.toLowerCase().includes(needle);
+            const matchesId = ws.id.toLowerCase().includes(needle);
+            if (!matchesTitle && !matchesPath && !matchesId) return false;
+          }
+          return true;
+        });
+
+        if (wsSort.startsWith("name-")) {
+          const dir = wsSort === "name-asc" ? 1 : -1;
+          return selected.map((ws, rank) => {
+            const name = (ws.title || ws.name || ws.id || "").toLowerCase();
+            return { ws, rank, name };
+          }).sort((a, b) => {
+            const cmp = a.name.localeCompare(b.name);
+            return cmp !== 0 ? dir * cmp : a.rank - b.rank;
+          }).map(item => item.ws);
+        }
+
+        const direction = wsSort === "updated-asc" ? 1 : -1;
+        return selected.map((ws, rank) => ({ ws, rank, time: ws.latestUpdatedAt }))
+          .sort((a, b) => {
+            if (a.time === b.time) return a.rank - b.rank;
+            if (a.time === null) return 1;
+            if (b.time === null) return -1;
+            return direction * (a.time - b.time);
+          })
+          .map(item => item.ws);
+      }, [allWorkspaceRows, wsQuery, wsFilter, wsSort, archiveVersion]);
+
+      const currentWsFilterIds = useMemo(() => filteredWorkspaceRows.map(ws => ws.id), [filteredWorkspaceRows]);
+      useEffect(() => {
+        const allowed = new Set(currentWsFilterIds);
+        setWsSelectedIds(prev => {
+          let changed = false;
+          const next = new Set();
+          for (const id of prev) if (allowed.has(id)) next.add(id); else changed = true;
+          return changed ? next : prev;
+        });
+      }, [currentWsFilterIds]);
+
+      const toggleWsSelectMode = () => {
+        if (wsSelectModeEnabled) {
+          setWsSelectModeEnabled(false);
+          setWsSelectedIds(new Set());
+          setWsLastClickedRank(null);
+        } else {
+          setWsSelectModeEnabled(true);
+        }
+      };
+
+      const toggleWsSelect = (id, isRange, rank) => {
+        if (wsBulkBusy) return;
+        setWsSelectedIds(prev => {
+          const next = new Set(prev);
+          if (isRange && wsLastClickedRank !== null && typeof rank === "number") {
+            const low = Math.min(wsLastClickedRank, rank);
+            const high = Math.max(wsLastClickedRank, rank);
+            for (let i = low; i <= high; i++) {
+              const row = filteredWorkspaceRows[i];
+              if (row) next.add(row.id);
+            }
+          } else {
+            if (next.has(id)) next.delete(id); else next.add(id);
+          }
+          return next;
+        });
+        setWsLastClickedRank(rank);
+      };
+
+      const onWsBulkSelectAll = () => {
+        setWsSelectModeEnabled(true);
+        setWsSelectedIds(new Set(filteredWorkspaceRows.map(ws => ws.id)));
+      };
+
+      const onWsBulkClear = () => {
+        setWsSelectedIds(new Set());
+        setWsLastClickedRank(null);
+      };
+
+      const onWsBulkArchive = async () => {
+        if (wsBulkBusy || !wsSelectModeEnabled || wsSelectedIds.size === 0) return;
+        const targetWs = workspaces.filter(ws => wsSelectedIds.has(ws.id) && !workspaceArchiveStore.isArchived(ws.id));
+        if (targetWs.length === 0) return;
+
+        const hostArchivedSet = new Set(workspaceSnapshot.archivedSessionIds || []);
+        for (const ws of targetWs) {
+          const toArchive = (ws.sessionIds || []).filter(id => !hostArchivedSet.has(id));
+          const runningSession = toArchive.map(id => list.byId[id]).find(s => s && s.running);
+          if (runningSession) {
+            const rTitle = runningSession.displayTitle || runningSession.id;
+            const wsTitle = ws.title || ws.name || ws.id;
+            const msg = (t("confirm.delete.running") || "该会话正在运行，无法归档。") + " (" + wsTitle + ": " + rTitle + ")";
+            if (typeof window !== "undefined" && typeof window.alert === "function") {
+              window.alert(msg);
+            }
+            return;
+          }
+        }
+
+        setWsBulkBusy(true);
+        try {
+          for (const ws of targetWs) {
+            await executeArchiveWorkspace(ws.id, { allWorkspaces: workspaces, t });
+          }
+          setWsSelectedIds(new Set());
+        } catch (err) {
+          setError(err?.message || String(err));
+        } finally {
+          setWsBulkBusy(false);
+        }
+      };
+
+      const onWsBulkUnarchive = async () => {
+        if (wsBulkBusy || !wsSelectModeEnabled || wsSelectedIds.size === 0) return;
+        const targetWs = workspaces.filter(ws => wsSelectedIds.has(ws.id) && workspaceArchiveStore.isArchived(ws.id));
+        if (targetWs.length === 0) return;
+
+        setWsBulkBusy(true);
+        try {
+          for (const ws of targetWs) {
+            await executeUnarchiveWorkspace(ws.id, { t });
+          }
+          setWsSelectedIds(new Set());
+        } catch (err) {
+          setError(err?.message || String(err));
+        } finally {
+          setWsBulkBusy(false);
+        }
+      };
+
+      const hasWsViewChanges = wsQuery !== "" || wsFilter !== "all" || wsSort !== "updated-desc";
+      const resetWsView = () => { setWsQuery(""); setWsFilter("all"); setWsSort("updated-desc"); };
+      const wsIsEn = typeof t === "function" && (t("workspace.filter.all") === "All" || t("marks.favorite") === "Favorite");
+
+      const renderWorkspaceRow = (ws, rank) => {
+        const isArchived = workspaceArchiveStore.isArchived(ws.id);
+        const isBusy = workspaceArchiveStore.isBusy(ws.id);
+        const title = ws.title || ws.name || ws.id;
+        const path = ws.path || "";
+        const sessionCount = typeof ws.sessionCount === "number" ? ws.sessionCount : (Array.isArray(ws.sessionIds) ? ws.sessionIds.length : 0);
+        const timeFormatted = ws.latestUpdatedAt !== null
+          ? t("workspace.lastUpdated", { time: formatRelative(ws.latestUpdatedAt, now) })
+          : "—";
+
+        const isWsSelected = wsSelectedIds.has(ws.id);
+        const checkbox = (wsSelectedIds.size === 0 && !wsSelectModeEnabled)
+          ? null
+          : h("label", { className: "sm-bulkRowCheckbox", onClick: (e) => e.stopPropagation() },
+              h("input", {
+                type: "checkbox",
+                checked: isWsSelected,
+                disabled: isBusy || wsBulkBusy,
+                "aria-label": t("bulk.checkbox.aria", { title: title }),
+                onChange: (e) => toggleWsSelect(ws.id, e.shiftKey === true, rank)
+              })
+            );
+
+        const handleToggleArchive = (e) => {
+          if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+          if (isBusy || wsBulkBusy) return;
+          if (!isArchived) {
+            const hostArchivedSet = new Set(workspaceSnapshot.archivedSessionIds || []);
+            const toArchive = (ws.sessionIds || []).filter(id => !hostArchivedSet.has(id));
+            const runningSession = toArchive.map(id => list.byId[id]).find(s => s && s.running);
+            if (runningSession) {
+              const rTitle = runningSession.displayTitle || runningSession.id;
+              const msg = (t("confirm.delete.running") || "该会话正在运行，无法归档。") + " (" + rTitle + ")";
+              if (typeof window !== "undefined" && typeof window.alert === "function") {
+                window.alert(msg);
+              }
+              return;
+            }
+            void executeArchiveWorkspace(ws.id, { allWorkspaces: workspaces, t });
+          } else {
+            void executeUnarchiveWorkspace(ws.id, { t });
+          }
+        };
+
+        const switchNode = h(SmSwitch, {
+          role: "switch",
+          "aria-checked": !isArchived,
+          checked: !isArchived,
+          loading: isBusy,
+          disabled: isBusy || wsBulkBusy,
+          ariaLabel: t("workspace.switch.aria", { name: title }),
+          onClick: handleToggleArchive,
+          onChange: handleToggleArchive
+        });
+
+        return h("div", {
+          key: ws.id,
+          "data-workspace-id": ws.id,
+          className: "sm-row sm-workspaceRow" + (isArchived ? " sm-rowArchived" : "") + (isWsSelected ? " sm-rowBulkSelected" : "")
+        },
+          h("div", { className: "sm-rowCheckboxSlot" + ((wsSelectedIds.size > 0 || wsSelectModeEnabled) ? " sm-rowCheckboxSlot-visible" : "") }, checkbox),
+          h("div", { className: "sm-rowMain" },
+            h("div", { className: "sm-rowTitle", title: path || title },
+              h("span", null, title),
+              isArchived ? h("span", { className: "sm-badge sm-badgeArchived" }, t("workspace.badge.archived")) : null
+            ),
+            h("div", { className: "sm-rowSecondary" },
+              h("div", { className: "sm-rowMeta" },
+                t("workspace.sessions", { count: sessionCount }) +
+                " · " +
+                timeFormatted
+              )
+            )
+          ),
+          h("div", { className: "sm-rowActions sm-workspaceRowActions" },
+            switchNode
+          )
+        );
+      };
+      const workspaceRowsList = filteredWorkspaceRows.length === 0
+        ? h("div", { className: "sm-empty" }, allWorkspaceRows.length > 0 ? t("workspace.empty.filtered") : t("workspace.empty"))
+        : h("div", { className: "sm-list" }, filteredWorkspaceRows.map((ws, rank) => renderWorkspaceRow(ws, rank)));
+
+      const onPanelClose = () => {
+        if (busyId !== null || wsBulkBusy) return;
+        setConfirmFor(null);
+        setMoveFor(null);
+        setMigrateFor(null);
+        onClose();
+      };
+      // Esc is handled at window level (issue #7): the original layer-
+      // bound onKeyDown was unreachable when focus stayed on the sidebar
+      // toggle button that opened the panel -- that button is a sibling
+      // of the panel layer, so keydown never bubbles into the panel
+      // subtree. The state ref lets the listener see the latest values
+      // without re-subscribing on every render. The panel listener
+      // returns early when any inner dialog is open so the child
+      // dialog's own window listener gets the first shot at Esc.
+      const panelRef = useRef(null);
+      const escStateRef = useRef({});
+      escStateRef.current = {
+        busyId,
+        confirmFor,
+        moveFor,
+        migrateFor,
+        annotationFor,
+        bulkPreview,
+        bulkProgress,
+        bulkResult,
+        bulkBusy,
+        bulkTagDraft,
+        bulkPresetDraft,
+        wsBulkBusy,
+        onPanelClose
+      };
+      useEffect(() => {
+        if (!open) return;
+        const handler = (e) => {
+          if (e.key !== "Escape") return;
+          if (e.defaultPrevented) return;
+          if (e.isComposing || e.keyCode === 229) return;
+          const s = escStateRef.current;
+          if (s.busyId !== null || s.wsBulkBusy || s.bulkBusy) return;
+          if (s.confirmFor || s.moveFor || s.migrateFor || s.annotationFor || s.bulkPreview || s.bulkProgress || s.bulkResult || s.bulkTagDraft || s.bulkPresetDraft) return;
+          if (typeof updateStore !== "undefined" && updateStore && typeof updateStore.getSnapshot === "function" && updateStore.getSnapshot()?.dialogOpen) return;
+          if (activeDialogZStack && activeDialogZStack.length > 0) return;
+          e.preventDefault();
+          e.stopPropagation();
+          s.onPanelClose();
+          // Esc after a keyboard-driven close leaves the originally-
+          // focused trigger button (sidebar toggle / row button) with
+          // :focus-visible still active -- blur it so no focus ring
+          // lingers after the panel closes. Mouse-driven closes are
+          // not affected: :focus-visible only activates for keyboard
+          // focus, so the ring never shows in that path.
+          const ae = document.activeElement;
+          if (ae && typeof ae.blur === "function" && ae !== document.body) ae.blur();
+        };
+        window.addEventListener("keydown", handler);
+        const mountTime = Date.now();
+        const clickHandler = (e) => {
+          if (Date.now() - mountTime < 50) return;
+          if (e.defaultPrevented) return;
+          const s = escStateRef.current;
+          if (s.busyId !== null || s.wsBulkBusy || s.bulkBusy) return;
+          if (s.annotationFor !== null) return;
+          if (s.confirmFor || s.moveFor || s.migrateFor) return;
+          if (s.bulkPreview || s.bulkProgress || s.bulkResult || s.bulkTagDraft || s.bulkPresetDraft) return;
+          if (typeof updateStore !== "undefined" && updateStore && typeof updateStore.getSnapshot === "function" && updateStore.getSnapshot()?.dialogOpen) return;
+          if (activeDialogZStack && activeDialogZStack.length > 0) return;
+          if (panelRef.current && typeof panelRef.current.contains === "function" && panelRef.current.contains(e.target)) return;
+          if (e.target && typeof e.target.closest === "function") {
+            if (e.target.closest(".sm-nativeDialog, .sm-panelDialog, .sm-bulkDialog, .sm-annotationDialog, .sm-annotationSurface, .sm-tooltip, .sm-footerBtn")) return;
+          }
+          s.onPanelClose();
+        };
+        window.addEventListener("click", clickHandler);
+        return () => {
+          window.removeEventListener("keydown", handler);
+          window.removeEventListener("click", clickHandler);
+        };
+      }, [open]);
+      // The panel is a document-level floating window, so it is portaled into
+      // the plugin's overlay root like every other dialog here (issue #28).
+      // Rendering it inside the sidebar slot confined it: the sidebar -- and,
+      // with a translucent theme, any ancestor carrying transform / filter /
+      // backdrop-filter / contain -- becomes the containing block for
+      // `position:fixed`, so the panel was clipped by that subtree and its
+      // z-index only competed inside that subtree's stacking context. The
+      // conversation area then painted over it (overlapping text, clicks
+      // landing on the conversation instead of the panel).
+      // The `sm-overlayLayer` wrapper is required too: the overlay root is
+      // `pointer-events:none`, and `.sm-overlayLayer>*{pointer-events:auto}` is
+      // the hook that makes its direct child -- and therefore the panel inside
+      // it -- interactive again.
+      const panelModal = renderInOverlay(h("div", {
+        className: "sm-overlayLayer"
+      },
+        h("div", {
+          className: "sm-nativeDialogLayer",
+          role: "presentation"
+        },
+        h("section", {
+          ref: panelRef,
+          className: "sm-nativeDialog sm-panelDialog",
+          role: "dialog",
+          "aria-modal": "true",
+          "aria-labelledby": "sm-panel-dialog-title"
+        },
+          h("div", { className: "sm-nativeDialogHeader" },
+            h("div", { className: "sm-panelHeaderLeft" },
+              renderTip(t("panel.github.title"), h("a", {
+                href: "https://github.com/hkkz9522/dsh-session-manager",
+                target: "_blank",
+                rel: "noopener noreferrer",
+                className: "sm-panelHeaderGithub",
+                "aria-label": t("panel.github.title")
+              },
+                h("svg", { viewBox: "0 0 16 16", width: 16, height: 16, "aria-hidden": "true" },
+                  h("path", {
+                    fill: "currentColor",
+                    d: "M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"
+                  })
+                )
+              )),
+              renderTip(updateState.status === "available"
+                ? t("panel.update.badge")
+                : updateState.status === "checking"
+                  ? t("update.checking")
+                  : updateState.status === "done"
+                    ? t("update.done.applied")
+                    : updateState.status === "error"
+                      ? (updateState.error || t("update.error"))
+                      : t("panel.update.title"),
+              h("a", {
+                role: "button",
+                tabIndex: 0,
+                className: "sm-panelHeaderGithub sm-panelHeaderWhale" + (updateState.status === "available" ? " sm-hasUpdate" : ""),
+                "aria-label": updateState.status === "available"
+                  ? t("panel.update.badge")
+                  : updateState.status === "checking"
+                    ? t("update.checking")
+                    : t("panel.update.title"),
+                onClick: (e) => {
+                  if (e && typeof e.preventDefault === "function") e.preventDefault();
+                  if (updateState.status === "available" || updateState.status === "done" || updateState.status === "updating") {
+                    updateStore.openDialog();
+                  } else {
+                    updateStore.openDialog();
+                    updateStore.checkForUpdate({ manual: true, silent: false, openDialog: true });
+                  }
+                },
+                onKeyDown: (e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    if (e && typeof e.preventDefault === "function") e.preventDefault();
+                    if (updateState.status === "available" || updateState.status === "done" || updateState.status === "updating") {
+                      updateStore.openDialog();
+                    } else {
+                      updateStore.openDialog();
+                      updateStore.checkForUpdate({ manual: true, silent: false, openDialog: true });
+                    }
+                  }
+                }
+              },
+                h(NpmIcon, { size: 16 }),
+                updateState.status === "available" ? h("span", { className: "sm-updateDot", "aria-hidden": "true" }) : null,
+                updateState.status === "checking" ? h("span", { className: "sm-updateSpinner", "aria-hidden": "true" }) : null
+              )),
+            ),
+            h("h2", { id: "sm-panel-dialog-title", className: "sm-nativeDialogTitle sm-visuallyHidden" }, t("panel.title")),
+            h("nav", { className: "sm-panelNav", "aria-label": t("panel.tab.sessions") || "页面切换" },
+              h("button", {
+                type: "button",
+                role: "tab",
+                "aria-selected": panelTab === "sessions",
+                className: "sm-panelNavTab" + (panelTab === "sessions" ? " sm-on" : ""),
+                onClick: () => setPanelTab("sessions")
+              }, t("panel.tab.sessions")),
+              h("button", {
+                type: "button",
+                role: "tab",
+                "aria-selected": panelTab === "workspaces",
+                className: "sm-panelNavTab" + (panelTab === "workspaces" ? " sm-on" : ""),
+                onClick: () => setPanelTab("workspaces")
+              }, t("panel.tab.workspaces"))
+            ),
+            h("div", { className: "sm-nativeDialogHeaderActions" },
+              renderTip(t("panel.close") || "关闭", h("button", {
+                type: "button",
+                className: "sm-panelHeaderClose",
+                disabled: busyId !== null || migrating || wsBulkBusy,
+                onClick: onPanelClose,
+                "aria-label": t("panel.close")
+              }, h(CloseIcon, { size: 14 })))
+            )
+          ),
+          h("div", { className: "sm-panel" },
+            panelTab === "workspaces" ? h(React.Fragment, null,
+              h("div", { className: "sm-panelTools" },
+                h("input", {
+                  type: "search", className: "sm-queryInput", value: wsQuery,
+                  placeholder: t("workspace.search"), "aria-label": t("workspace.search"), autoComplete: "off",
+                  onChange: event => setWsQuery(event.target.value)
+                }),
+                h("div", { className: "sm-markFilters sm-wsFilters" },
+                  h("div", { className: "sm-markFiltersGroup" },
+                    h("button", {
+                      type: "button", key: "all",
+                      className: "sm-filterBtn" + (wsFilter === "all" ? " sm-on" : ""),
+                      "aria-pressed": wsFilter === "all",
+                      onClick: () => setWsFilter("all")
+                    }, t("workspace.filter.all")),
+                    h("button", {
+                      type: "button", key: "active",
+                      className: "sm-filterBtn" + (wsFilter === "active" ? " sm-on" : ""),
+                      "aria-pressed": wsFilter === "active",
+                      onClick: () => setWsFilter("active")
+                    }, t("workspace.filter.active")),
+                    h("button", {
+                      type: "button", key: "archived",
+                      className: "sm-filterBtn" + (wsFilter === "archived" ? " sm-on" : ""),
+                      "aria-pressed": wsFilter === "archived",
+                      onClick: () => setWsFilter("archived")
+                    }, t("workspace.filter.archived")),
+                    h("div", { className: "sm-viewField sm-wsSortField" },
+                      h("select", {
+                        className: "sm-viewSelect sm-wsSortSelect" + (wsIsEn ? " sm-wsSortSelect-en" : ""), "aria-label": t("panel.sort"), value: wsSort,
+                        onMouseDown: e => e.stopPropagation(),
+                        onClick: e => e.stopPropagation(),
+                        onChange: event => setWsSort(event.target.value)
+                      },
+                        h("option", { value: "updated-desc" }, t("workspace.sort.updated-desc")),
+                        h("option", { value: "updated-asc" }, t("workspace.sort.updated-asc")),
+                        h("option", { value: "name-asc" }, t("workspace.sort.name-asc")),
+                        h("option", { value: "name-desc" }, t("workspace.sort.name-desc"))
+                      )
+                    )
+                  ),
+                  h("div", { className: "sm-markFiltersSpacer" }),
+                  h("div", { className: "sm-markFiltersGroup sm-wsFiltersBulk" },
+                    h("button", {
+                      type: "button",
+                      className: "sm-filterBtn" + (wsSelectModeEnabled ? " sm-on" : ""),
+                      disabled: busyId !== null || migrating || wsBulkBusy,
+                      "aria-pressed": wsSelectModeEnabled,
+                      "aria-label": t(wsSelectModeEnabled ? "panel.selectMode.exit" : "panel.selectMode.aria"),
+                      onClick: toggleWsSelectMode
+                    }, wsSelectModeEnabled ? t("panel.selectMode.exit") : t("panel.selectMode")),
+                    h("button", {
+                      type: "button",
+                      className: "sm-filterBtn sm-bulkSelectBtn",
+                      disabled: filteredWorkspaceRows.length === 0 || wsSelectedIds.size === filteredWorkspaceRows.length || wsBulkBusy,
+                      onClick: onWsBulkSelectAll,
+                      "aria-label": t("bulk.selectAllFiltered")
+                    }, t("bulk.selectAllFiltered")),
+                    h("button", {
+                      type: "button",
+                      className: "sm-filterBtn sm-bulkSelectBtn",
+                      disabled: wsSelectedIds.size === 0 || wsBulkBusy,
+                      onClick: onWsBulkClear,
+                      "aria-label": t("bulk.clear")
+                    }, t("bulk.clear")),
+                    h("button", {
+                      type: "button",
+                      className: "sm-filterBtn",
+                      disabled: !wsSelectModeEnabled || wsSelectedIds.size === 0 || wsBulkBusy,
+                      onClick: onWsBulkArchive,
+                      "aria-label": t("workspace.bulk.archive")
+                    }, t("workspace.bulk.archive")),
+                    h("button", {
+                      type: "button",
+                      className: "sm-filterBtn",
+                      disabled: !wsSelectModeEnabled || wsSelectedIds.size === 0 || wsBulkBusy,
+                      onClick: onWsBulkUnarchive,
+                      "aria-label": t("workspace.bulk.unarchive")
+                    }, t("workspace.bulk.unarchive"))
+                  )
+                ),
+                h("div", { className: "sm-resultSummary" },
+                  h("span", { role: "status", "aria-live": "polite", "aria-atomic": "true" },
+                    (wsSelectModeEnabled || wsSelectedIds.size > 0)
+                      ? t("bulk.selectedFiltered", { selected: wsSelectedIds.size, filtered: filteredWorkspaceRows.length })
+                      : t("workspace.count", { shown: filteredWorkspaceRows.length, total: allWorkspaceRows.length })
+                  ),
+                  hasWsViewChanges ? h("button", { type: "button", className: "sm-resetFilters", onClick: resetWsView }, t("workspace.reset")) : null
+                ),
+                (workspacesLoading && workspaces.length === 0) ? h("div", { className: "sm-workspaceNotice", role: "status" }, t("panel.workspace.loading")) : null,
+                workspacesError ? h("div", { className: "sm-workspaceNotice", role: "alert" },
+                  h("span", null, t("panel.workspace.error", { message: workspacesError })),
+                  h("button", { type: "button", className: "sm-resetFilters", onClick: () => setWorkspaceRefresh(value => value + 1) }, t("panel.workspace.retry"))
+                ) : null
+              ),
+              error ? h("div", { className: "sm-error", role: "alert" }, t("error.operation", { message: error })) : null,
+              workspaceRowsList
+            ) : h(React.Fragment, null,
+              h("div", { className: "sm-panelTools" },
+                h("input", {
+                  type: "search", className: "sm-queryInput", value: query,
+                  placeholder: t("panel.search"), "aria-label": t("panel.search"), autoComplete: "off",
+                  onChange: event => setQuery(event.target.value)
+                }),
+                h("div", { className: "sm-panelSelects" },
+                  h("div", { className: "sm-viewField" },
+                    h("span", null, t("panel.workspace")),
+                    h("select", {
+                      className: "sm-viewSelect", "aria-label": t("panel.workspace"), value: workspaceFilter,
+                      disabled: workspacesLoading || workspacesError !== null,
+                      onMouseDown: e => e.stopPropagation(),
+                      onClick: e => e.stopPropagation(),
+                      onChange: event => setWorkspaceFilter(event.target.value)
+                    },
+                      h("option", { value: "all" }, t("panel.workspace.all")),
+                      h("option", { value: "ungrouped" }, t("panel.workspace.ungrouped")),
+                      workspaces.map(workspace => h("option", { key: workspace.id, value: workspaceValue(workspace.id), title: workspace.path || workspace.id }, workspace.title || workspace.name || workspace.id))
+                    )
+                  ),
+                  h("div", { className: "sm-viewField" },
+                    h("span", null, t("panel.sort")),
+                    h("select", {
+                      className: "sm-viewSelect", "aria-label": t("panel.sort"), value: sortOrder,
+                      onMouseDown: e => e.stopPropagation(),
+                      onClick: e => e.stopPropagation(),
+                      onChange: event => setSortOrder(event.target.value)
+                    }, SORT_ORDERS.map(value => h("option", { key: value, value, disabled: value === "priority" && !marksReady }, t(value === "priority" ? "marks.sort" : "panel.sort." + value))))
+                  ),
+                  h("div", { className: "sm-viewField" },
+                    h("span", null, t("marks.tags")),
+                    h("select", {
+                      className: "sm-viewSelect", "aria-label": t("marks.filter.tags"), value: tagFilter, disabled: !marksReady,
+                      onMouseDown: e => e.stopPropagation(),
+                      onClick: e => e.stopPropagation(),
+                      onChange: e => setTagFilter(e.target.value)
+                    },
+                      h("option", { value: "all" }, t("marks.tags.all")), h("option", { value: "none" }, t("marks.tags.none")),
+                      availableTags.map(([key, tag]) => h("option", { key, value: "tag:" + key }, tag)),
+                      tagFilter.startsWith("tag:") && !availableTags.some(([key]) => "tag:" + key === tagFilter) ? h("option", { value: tagFilter }, t("marks.tags.missing", { tag: tagFilter.slice(4) })) : null
+                    )
+                  ),
+                  h("div", { className: "sm-viewField" },
+                    h("span", null, t("marks.priority")),
+                    h("select", {
+                      className: "sm-viewSelect", "aria-label": t("marks.filter.priority"), value: priorityFilter, disabled: !marksReady,
+                      onMouseDown: e => e.stopPropagation(),
+                      onClick: e => e.stopPropagation(),
+                      onChange: e => setPriorityFilter(e.target.value)
+                    },
+                      h("option", { value: "all" }, t("marks.priority.all")),
+                      [1,2,3,4,5].map(value => h("option", { key: value, value: String(value) }, t("marks.priority." + value)))
+                    )
+                  )
+                ),
+                h("div", { className: "sm-markFilters" },
+                  h("div", { className: "sm-markFiltersGroup" },
+                    filterBtn("all", t("panel.filter.all")),
+                    filterBtn("active", t("panel.filter.active")),
+                    filterBtn("archived", t("panel.filter.archived")),
+                    h("button", { type: "button", className: "sm-filterBtn sm-markFilterToggle" + (onlyFavorite ? " sm-on" : ""), "aria-label": t("marks.filter.favorite.aria"), "aria-pressed": onlyFavorite, disabled: !marksReady, onClick: () => setOnlyFavorite(value => !value) }, "★ " + t("marks.filter.favorite")),
+                    h("button", { type: "button", className: "sm-filterBtn sm-markFilterToggle" + (onlyReview ? " sm-on" : ""), "aria-label": t("marks.filter.review.aria"), "aria-pressed": onlyReview, disabled: !marksReady, onClick: () => setOnlyReview(value => !value) }, "◷ " + t("marks.filter.review"))
+                  ),
+                  h("div", { className: "sm-markFiltersSpacer" }),
+                  h("div", { className: "sm-markFiltersGroup" },
+                    h("button", {
+                      type: "button",
+                      className: "sm-filterBtn" + (selectModeEnabled ? " sm-on" : ""),
+                      disabled: busyId !== null || migrating,
+                      "aria-pressed": selectModeEnabled,
+                      "aria-label": t(selectModeEnabled ? "panel.selectMode.active.aria" : "panel.selectMode.aria"),
+                      onClick: toggleSelectMode
+                    }, selectModeEnabled ? t("panel.selectMode.exit") : t("panel.selectMode")),
+                    h("button", { type: "button", className: "sm-filterBtn sm-bulkSelectBtn", disabled: rows.length === 0 || rows.length === selectedIds.size || bulkBusy, onClick: onBulkSelectAll, "aria-label": t("bulk.selectAllFiltered") }, t("bulk.selectAllFiltered")),
+                    h("button", { type: "button", className: "sm-filterBtn sm-bulkSelectBtn", disabled: selectedIds.size === 0 || bulkBusy, onClick: onBulkClear, "aria-label": t("bulk.clear") }, t("bulk.clear"))
+                  )
+                ),
+                h("div", { className: "sm-resultSummary" },
+                  h("span", { role: "status", "aria-live": "polite", "aria-atomic": "true" }, t("panel.count", { shown: rows.length, total: allRows.length })),
+                  hasViewChanges ? h("button", { type: "button", className: "sm-resetFilters", onClick: resetView }, t("panel.reset")) : null
+                ),
+                annotations.loading && !annotations.loaded ? h("div", { className: "sm-workspaceNotice", role: "status" }, t("marks.loading")) : null,
+                annotations.error ? h("div", { className: "sm-workspaceNotice", role: "alert" }, t("marks.error", { message: annotations.error }), h("button", { type: "button", className: "sm-resetFilters", onClick: () => annotationStore.load(true) }, t("marks.retry"))) : null,
+                creationTimeUnavailable && !(workspacesLoading && workspaces.length === 0) ? h("div", { className: "sm-workspaceNotice", role: "status" }, t("panel.sort.unavailable")) : null,
+                (workspacesLoading && workspaces.length === 0) ? h("div", { className: "sm-workspaceNotice", role: "status" }, t("panel.workspace.loading")) : null,
+                workspacesError ? h("div", { className: "sm-workspaceNotice", role: "alert" },
+                  h("span", null, t("panel.workspace.error", { message: workspacesError })),
+                  h("button", { type: "button", className: "sm-resetFilters", onClick: () => setWorkspaceRefresh(value => value + 1) }, t("panel.workspace.retry"))
+                ) : null
+              ),
+              error ? h("div", { className: "sm-error", role: "alert" }, t("error.operation", { message: error })) : null,
+              (selectedIds.size > 0 || selectModeEnabled) ? h(BulkActionBar, {
+                t, selectedCount: selectedIds.size, filteredCount: rows.length, busy: bulkBusy,
+                onSelectAll: onBulkSelectAll, onClear: onBulkClear,
+                onAction: onBulkAction,
+                onOpenTagDialog: onBulkTagsAdd,
+                onOpenPriorityDialog: onBulkPriority,
+                onOpenMoveDialog: onBulkMove,
+                onOpenPresetDialog: onBulkPreset
+              }) : null,
+              rowsList
+            )
+          )
+        )
+      )));
+
+      const deleteDialog = confirmFor === null ? null : h(ConfirmDialog, {
+        open: true,
+        onClose: () => { if (busyId === null) setConfirmFor(null); },
+        title: t("confirm.delete.title"),
+        description: (confirmFor.displayTitle && t("confirm.delete.desc", { title: confirmFor.displayTitle })) || "",
+        warning: (() => {
+          const baseWarning = (confirmFor.running ? (t("confirm.delete.running") + " " + t("bulk.dialog.warning.delete")) : t("bulk.dialog.warning.delete"));
+          if (confirmPreviewState.loading) {
+            const loadingMsg = t("confirm.delete.previewLoading") || "正在检查关联的子智能体会话…";
+            return `${loadingMsg}\n${baseWarning}`;
+          }
+          if (confirmPreviewState.error) {
+            const errorMsg = confirmPreviewState.error;
+            return `${errorMsg}\n${baseWarning}`;
+          }
+          const subagentWarning = confirmPreviewState.subagentCount > 0 ? t("confirm.delete.subagents", { count: confirmPreviewState.subagentCount }) : "";
+          return subagentWarning ? `${subagentWarning}\n${baseWarning}` : baseWarning;
+        })(),
+        confirmDisabled: confirmPreviewState.loading || Boolean(confirmPreviewState.error),
+        confirmLabel: t("confirm.delete.confirm"),
+        cancelLabel: t("confirm.cancel"),
+        busy: busyId !== null,
+        danger: true,
+        onCancel: () => { if (busyId === null) setConfirmFor(null); },
+        onConfirm: () => {
+          if (confirmPreviewState.loading || confirmPreviewState.error) return;
+          const target = confirmFor;
+          setConfirmFor(null);
+          runRow(target.id, () => onRemove(target.id));
+        }
+      });
+      const moveDialog = moveFor === null ? null : h(MoveDialog, {
+        open: true,
+        onClose: () => { if (busyId === null) setMoveFor(null); },
+        /* Forward the locale function so the inner labels (e.g. confirm.move.select, confirm.move.empty) get translated; without this they render as raw keys. (issue #17.2) */
+        t: t,
+        title: t("confirm.move.title"),
+        /* Show the real session display title only (no raw id); falls back to empty so the description
+           stays blank when the name is unknown instead of leaking the id into the dialog body. (issue #17.2 follow-up) */
+        description: (moveFor.displayTitle && t("confirm.move.desc", { title: moveFor.displayTitle })) || "",
+        currentWorkspaceId: moveFor.workspaceId,
+        workspaces: workspaces,
+        confirmLabel: t("confirm.move.confirm"),
+        cancelLabel: t("confirm.cancel"),
+        busy: busyId !== null,
+        onCancel: () => { if (busyId === null) setMoveFor(null); },
+        onConfirm: (targetWorkspaceId) => {
+          const target = moveFor;
+          setMoveFor(null);
+          runRow(target.id, async () => {
+            await onMove(target.id, targetWorkspaceId);
+            setWorkspaceRefresh(value => value + 1);
+          });
+        }
+      });
+      const migrateDialog = migrateFor === null ? null : h(MigratePresetDialog, {
+        open: true,
+        t: t,
+        sessionId: migrateFor.id,
+        currentPreset: migrateFor.agentPreset || "",
+        description: (migrateFor.displayTitle && t("migrate.desc", { title: migrateFor.displayTitle })) || (migrateFor.id && t("migrate.desc", { title: migrateFor.id })) || "",
+        onCancel: () => { if (!migrating) setMigrateFor(null); },
+        busy: migrating,
+        onRun: async (targetPreset) => {
+          const target = migrateFor;
+          setMigrating(true);
+          setError(null);
+          try {
+            await onMigrate(target.id, targetPreset);
+            setMigrateFor(null);
+            try { window.alert(t("migrate.completed", { preset: targetPreset })); } catch (_) {}
+          } catch (error) {
+            setError(error instanceof Error ? error.message : String(error));
+            setMigrateFor(null);
+          } finally {
+            setMigrating(false);
+          }
+        }
+      });
+      // Render the panel AND the inner dialog as siblings so React keeps
+      // both mounted. CSS z-index keeps the right ordering: the inner
+      // dialog (.sm-confirmDialog / .sm-moveDialog / .sm-migrateDialog)
+      // lives in the #dsh-session-manager-overlay-root context (1050) and
+      // therefore sits ON TOP OF the panel (1020, in DSH's own document
+      // context). Clicking inside the panel that the inner dialog
+      // blocks is not possible because the inner backdrop covers the
+      // panel area entirely (the inner modal is centered).
+      const annotationDialog = annotationFor ? h(AnnotationDialog, { key: annotationFor.id, sessionId: annotationFor.id, displayTitle: annotationFor.displayTitle || annotationFor.id, t, anchor: annotationAnchor, onClose: () => { setAnnotationFor(null); setAnnotationAnchor(null); } }) : null;
+      // Render panel + ALL inner dialogs together; z-index ordering puts
+      // whichever dialog is open above the panel. The bulk dialogs are
+      // appended here so destructive actions get a preview, in-flight
+      // operations get a progress bar, and finished runs show per-id
+      // success / failed / skipped counts.
+      // Map bulk action -> 4-char confirm label ("确认<verb>"). Delete is
+      // the only destructive action routed through BatchPreviewDialog, so it
+      // also gets danger: true so the confirm button paints red.
+      const bulkConfirmLabelFor = (action) => ({
+        archive: t("bulk.confirm.archive"),
+        unarchive: t("bulk.confirm.unarchive"),
+        favorite: t("bulk.confirm.favorite"),
+        unfavorite: t("bulk.confirm.unfavorite"),
+        review: t("bulk.confirm.review"),
+        unreview: t("bulk.confirm.unreview"),
+        "add-tags": t("bulk.confirm.tagsAdd"),
+        "remove-tags": t("bulk.confirm.tagsRemove"),
+        "set-priority": t("bulk.confirm.priority"),
+        move: t("bulk.confirm.move"),
+        "preset-migrate": t("bulk.confirm.presetMigrate"),
+        delete: t("bulk.confirm.delete")
+      })[action] || t("bulk.dialog.execute");
+      const bulkPreviewDialog = bulkPreview ? h(BatchPreviewDialog, {
+        open: true, t, action: bulkPreview.action, actionLabel: bulkPreview.actionLabel,
+        title: bulkPreview.action === "delete" ? t("confirm.delete.title") : undefined,
+        sessions: bulkPreview.sessions, warning: bulkPreview.warning,
+        confirmLabel: bulkConfirmLabelFor(bulkPreview.action),
+        danger: bulkPreview.action === "delete",
+        loading: bulkPreview.loading === true,
+        error: bulkPreview.error || null,
+        onCancel: () => setBulkPreview(null),
+        onExecute: () => {
+          if (bulkPreview.loading || bulkPreview.error) return;
+          const preview = bulkPreview;
+          setBulkPreview(null);
+          void executeBulk({
+            action: preview.action, payload: preview.payload,
+            actionLabel: preview.actionLabel,
+            ids: preview.sessions.map(s => s.id), sessions: preview.sessions
+          });
+        }
+      }) : null;
+      const bulkProgressDialog = bulkProgress ? h(BatchProgressDialog, {
+        open: true, t, actionLabel: bulkProgress.actionLabel,
+        done: bulkProgress.done, total: bulkProgress.total, completed: false,
+        onCancel: () => { try { bulkProgress.cancel(); } catch (_) {} }
+      }) : null;
+      const bulkResultDialog = bulkResult ? h(BatchResultDialog, {
+        open: true, t, actionLabel: bulkResult.actionLabel,
+        items: bulkResult.items,
+        onClose: () => { setBulkResult(null); clearSelection(); },
+        onRetry: (failedIds) => {
+          const last = bulkResult;
+          setBulkResult(null);
+          retryFailedBulk(failedIds, last.action, last.payload, last.actionLabel);
+        }
+      }) : null;
+      const bulkTagDialog = bulkTagDraft && bulkTagDraft.mode === "add" ? h(BulkTagInputDialog, {
+        open: true, t, title: t("bulk.tagsAdd"),
+        description: t("bulk.dialog.summary", { count: selectedIds.size, action: t("bulk.tagsAdd.actionText") }),
+        confirmLabel: t("bulk.confirm.tagsAdd"),
+        onCancel: () => setBulkTagDraft(null),
+        onApply: onBulkTagApply
+      }) : null;
+      const bulkPriorityDialog = bulkTagDraft && bulkTagDraft.mode === "priority" ? h(BulkChoiceDialog, {
+        open: true, t, title: t("bulk.priority"),
+        description: t("bulk.dialog.summary", { count: selectedIds.size, action: t("bulk.priority.actionText") }),
+        options: bulkPriorityOptions,
+        confirmLabel: t("bulk.confirm.priority"),
+        onCancel: () => setBulkTagDraft(null),
+        onApply: onBulkPriorityApply
+      }) : null;
+      const bulkMoveDialog = bulkTagDraft && bulkTagDraft.mode === "move" ? h(BulkChoiceDialog, {
+        open: true, t, title: t("bulk.move"),
+        description: t("bulk.dialog.summary", { count: selectedIds.size, action: t("bulk.move.actionText") }),
+        options: bulkMoveOptions,
+        confirmLabel: t("bulk.confirm.move"),
+        onCancel: () => setBulkTagDraft(null),
+        onApply: onBulkMoveApply
+      }) : null;
+      const bulkPresetDialog = bulkPresetDraft ? h(BulkChoiceDialog, {
+        open: true, t, title: t("bulk.presetMigrate"),
+        description: t("bulk.dialog.summary", { count: selectedIds.size, action: t("bulk.presetMigrate.actionText") }),
+        options: bulkPresetOptions,
+        confirmLabel: t("bulk.confirm.presetMigrate"),
+        onCancel: () => setBulkPresetDraft(null),
+        onApply: onBulkPresetApply
+      }) : null;
+      const workspaceArchiveConfirmDialog = null;
+      // Bulk dialogs are portaled into the overlay root like every other
+      // dialog, so their static z-index (10002) only orders them inside that
+      // context; the root's own 1050 keeps them below DSH's 1100 tooltip tier.
+      return h(React.Fragment, null, panelModal, annotationDialog, moveDialog, deleteDialog, migrateDialog, bulkPreviewDialog, bulkProgressDialog, bulkResultDialog, bulkTagDialog, bulkPriorityDialog, bulkMoveDialog, bulkPresetDialog, workspaceArchiveConfirmDialog);
+    }
+
+    function HeaderAction(props) {
+      const t = props.t;
+      const sessionId = props.sessionId;
+      const useSessions = props.useSessions;
+      // Resolve the friendly display title once per render. Earlier this
+      // lived inside a realDisplayTitle() helper that was called from the
+      // setMoveFor / setConfirmFor / setAnnotationFor onClick handlers,
+      // which invoked useSessions() outside React's render phase. The
+      // slot framework's useSyncExternalStore subscriber reads .current off
+      // the active fiber and that handle goes null during an event
+      // dispatch, so the hook threw "Cannot read properties of null
+      // (reading 'current')". The surrounding SlotErrorBoundary then
+      // replaced the whole conversation.session.header.actions slot with
+      // <div data-slot-error="…" />, taking every title-bar button down
+      // and leaving 移动 / 删除 with no click target. Compute the value
+      // here once per render, then reuse the captured const in handlers.
+      const displayTitle = (() => {
+        const fallback = props.displayTitle;
+        if (fallback && fallback !== sessionId) return fallback;
+        const list = useSessions ? useSessions((s) => s) : null;
+        const found = list ? list.byId[sessionId] : null;
+        return (found && found.displayTitle) || "";
+      })();
+      const currentWorkspaceId = (() => {
+        const list = useSessions ? useSessions((s) => s) : null;
+        const found = list ? list.byId[sessionId] : null;
+        return (found && found.workspaceId) || props.workspaceId || "";
+      })();
+      const annotations = useAnnotations();
+      const [annotationFor, setAnnotationFor] = useState(null);
+      const [annotationAnchor, setAnnotationAnchor] = useState(null);
+      // Slot framework spreads inject-factory return into top-level props,
+      // so the action callbacks live directly on props (not under .actions).
+      const onArchive = props.onArchive, onUnarchive = props.onUnarchive;
+      const onMove = props.onMove, onRemove = props.onRemove;
+      // Archive state lives in the workspace registry's archivedSessionIds
+      // (exposed through the global standard kit's useWorkspaces selector).
+      const useWorkspaces = props.useWorkspaces;
+      const archivedIds = (useWorkspaces ? useWorkspaces((s) => s.archivedSessionIds) : null) || [];
+      const isArchived = archivedIds.includes(sessionId);
+
+      const [confirmFor, setConfirmFor] = useState(null);
+      const [confirmAnchor, setConfirmAnchor] = useState(null);
+      const [confirmPreviewState, setConfirmPreviewState] = useState({ loading: false, error: null, subagentCount: 0 });
+      useEffect(() => {
+        if (!confirmFor || !confirmFor.id) {
+          setConfirmPreviewState({ loading: false, error: null, subagentCount: 0 });
+          return;
+        }
+        let alive = true;
+        setConfirmPreviewState({ loading: true, error: null, subagentCount: 0 });
+        fetchApi("/delete-preview?sessionId=" + encodeURIComponent(confirmFor.id))
+          .then((res) => {
+            if (!alive) return;
+            if (res && res.ok && res.result && typeof res.result.subagentCount === "number") {
+              setConfirmPreviewState({ loading: false, error: null, subagentCount: res.result.subagentCount });
+            } else {
+              setConfirmPreviewState({ loading: false, error: res?.error || (t ? t("confirm.delete.previewError") : "检查关联子智能体会话失败，请稍后重试"), subagentCount: 0 });
+            }
+          })
+          .catch((err) => {
+            if (!alive) return;
+            setConfirmPreviewState({ loading: false, error: (err && err.message) || (t ? t("confirm.delete.previewError") : "检查关联子智能体会话失败，请稍后重试"), subagentCount: 0 });
+          });
+        return () => { alive = false; };
+      }, [confirmFor?.id]);
+      const [moveFor, setMoveFor] = useState(null);
+      const [moveAnchor, setMoveAnchor] = useState(null);
+      const [workspaces, setWorkspaces] = useState([]);
+      const runWithAlert = (label, fn) => {
+        return Promise.resolve()
+          .then(() => fn())
+          .catch((e) => {
+            try {
+              const msg = e instanceof Error ? e.message : String(e);
+              window.alert(((t && t("error.operation")) || "操作失败：{message}").replace("{message}", msg));
+            } catch (_) {}
+          });
+      };
+      useEffect(() => {
+        if (!moveFor) { setWorkspaces([]); return; }
+        let alive = true;
+        fetchApi("/workspaces").then((d) => {
+          if (alive && d && d.ok) setWorkspaces(d.result.workspaces || []);
+        });
+        return () => { alive = false; };
+      }, [moveFor ? (moveFor.id || "x") : null]);
+      const [moreOpen, setMoreOpen] = useState(false);
+      const headerRef = useRef(null);
+      const moreBtnRef = useRef(null);
+      const moreBtnElRef = useRef(null);
+      useEffect(() => {
+        if (!moreOpen) return;
+        const onDocClick = (e) => {
+          if (moreBtnRef.current && moreBtnRef.current.contains(e.target)) return;
+          setMoreOpen(false);
+        };
+        const onKey = (e) => {
+          if (e.key === "Escape") setMoreOpen(false);
+        };
+        window.addEventListener("click", onDocClick, true);
+        window.addEventListener("keydown", onKey, true);
+        return () => {
+          window.removeEventListener("click", onDocClick, true);
+          window.removeEventListener("keydown", onKey, true);
+        };
+      }, [moreOpen]);
+
+      const getMoreBtn = () => {
+        if (moreBtnElRef.current && moreBtnElRef.current.nodeType === 1) return moreBtnElRef.current;
+        if (moreBtnRef.current) {
+          const btn = moreBtnRef.current.querySelector(".sm-headerCompactMenuBtn");
+          if (btn) return btn;
+        }
+        if (headerRef.current) {
+          const btn = headerRef.current.querySelector(".sm-headerCompactMenuBtn");
+          if (btn) return btn;
+        }
+        return null;
+      };
+
+      const isVisible = (element) => {
+        if (!element || typeof element.getBoundingClientRect !== "function") return false;
+        if (typeof element.isConnected === "boolean" && !element.isConnected) return false;
+        const rect = element.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) return false;
+        if (typeof element.offsetParent !== "undefined" && element.offsetParent === null && element.style?.position !== "fixed") return false;
+        return true;
+      };
+
+      const resolveActiveAnchorEl = (targetEl, actionType) => {
+        if (isVisible(targetEl)) return targetEl;
+        const moreBtn = getMoreBtn();
+        if (isVisible(moreBtn)) return moreBtn;
+        if (headerRef.current) {
+          if (actionType === "annotation") {
+            const btn = headerRef.current.querySelector(".sm-headerSecondaryAction")
+              || headerRef.current.querySelector(".sm-annotationToggleOpen")
+              || headerRef.current.querySelector("[aria-label*='marks']")
+              || headerRef.current.querySelector("[aria-label*='标签']");
+            if (isVisible(btn)) return btn;
+          } else if (actionType === "move") {
+            const btn = headerRef.current.querySelector(".sm-headerSecondaryActions button:first-child")
+              || headerRef.current.querySelector("[aria-label*='move']")
+              || headerRef.current.querySelector("[aria-label*='移动']");
+            if (isVisible(btn)) return btn;
+          } else if (actionType === "delete") {
+            const btn = headerRef.current.querySelector(".sm-headerSecondaryActions button:last-child")
+              || headerRef.current.querySelector(".sm-headerBtnDanger");
+            if (isVisible(btn)) return btn;
+          }
+          if (isVisible(headerRef.current)) return headerRef.current;
+        }
+        return moreBtn || targetEl || null;
+      };
+
+      // Anchor dialogs to the trigger button with dynamic tracking (issue #19 / #20).
+      const anchorFor = (el, actionType) => {
+        const domEl = el?.nodeType === 1 ? el : (el?.currentTarget || el?.target || el?.current || el);
+        if (!domEl || typeof domEl.getBoundingClientRect !== "function") return domEl || null;
+
+        const activeEl = resolveActiveAnchorEl(domEl, actionType);
+        const r = (activeEl && isVisible(activeEl) ? activeEl : domEl).getBoundingClientRect();
+
+        const sbRight = getSidebarRight();
+        const minLeft = Math.max(8, sbRight > 0 ? sbRight + 8 : 8);
+        return {
+          top: Math.round(r.top + r.height + 6),
+          left: Math.max(8, Math.round(r.right - 360)),
+          current: domEl,
+          nodeType: domEl.nodeType,
+          actionType: actionType,
+          resolveActiveEl: () => resolveActiveAnchorEl(domEl, actionType),
+          getBoundingClientRect: () => {
+            const currentEl = resolveActiveAnchorEl(domEl, actionType);
+            if (currentEl && typeof currentEl.getBoundingClientRect === "function") {
+              const curR = currentEl.getBoundingClientRect();
+              if (curR.width > 0 || curR.height > 0) return curR;
+            }
+            if (headerRef.current && typeof headerRef.current.getBoundingClientRect === "function") {
+              const hr = headerRef.current.getBoundingClientRect();
+              if (hr.width > 0 || hr.height > 0) return hr;
+            }
+            return r;
+          }
+        };
+      };
+      const currentAnnotation = annotationOf(annotations, sessionId);
+      const isAnnotationBusy = !annotations.loaded || !!annotations.error || annotations.pending.has(sessionId);
+      const archiveLabelKey = isArchived ? "row.unarchive" : "row.archive";
+      const getMenuStyle = () => {
+        if (!moreOpen || typeof window === "undefined") return undefined;
+        const btn = moreBtnElRef.current || moreBtnRef.current;
+        if (!btn || typeof btn.getBoundingClientRect !== "function") return undefined;
+        try {
+          const r = btn.getBoundingClientRect();
+          const sbRight = getSidebarRight();
+          if (sbRight > 0 && (r.right - 160) < (sbRight + 8)) {
+            return { right: "auto", left: 0 };
+          }
+        } catch (_) {}
+        return undefined;
+      };
+      const menuStyle = getMenuStyle();
+      return h(React.Fragment, null,
+        annotationFor ? h(AnnotationDialog, { key: annotationFor.id, sessionId: annotationFor.id, displayTitle: annotationFor.displayTitle, t, anchor: annotationAnchor, onClose: () => { setAnnotationFor(null); setAnnotationAnchor(null); } }) : null,
+        h("div", { className: "sm-header", ref: headerRef },
+          (onArchive || onUnarchive) ? renderTip(t ? t(archiveLabelKey) : (isArchived ? "移出归档" : "归档会话"), h("button", {
+            type: "button",
+            className: "sm-headerBtn" + (isArchived ? " sm-headerBtnActive" : ""),
+            "aria-label": t ? t(archiveLabelKey) : (isArchived ? "移出归档" : "归档会话"),
+            onClick: () => runWithAlert("archive", () =>
+              isArchived ? onUnarchive(sessionId) : onArchive(sessionId)
+            )
+          },
+            h("span", { className: "sm-headerBtnIcon" }, HeaderArchiveIcon({ unarchive: isArchived })),
+            h("span", { className: "sm-headerBtnLabel" }, isArchived ? (t ? t("row.unarchive") : "移出归档") : (t ? t("row.archive") : "归档"))
+          )) : null,
+          annotationButtons(sessionId, props.displayTitle || sessionId, t, annotations, "sm-headerBtn", patch => runWithAlert("annotations", () => annotationStore.save(sessionId, patch)), (e) => {
+            const nextOpen = !(annotationFor && annotationFor.id === sessionId);
+            // Do NOT clear moveFor / confirmFor here: the z-index counter
+            // (see nextDialogZ) decides stacking, so opening the annotation
+            // popup must not silently dismiss a previously opened move or
+            // delete popup on the same session.
+            if (nextOpen && e && e.currentTarget) {
+              setAnnotationAnchor(anchorFor(e.currentTarget, "annotation"));
+            } else setAnnotationAnchor(null);
+            setAnnotationFor(current => current?.id === sessionId ? null : { id: sessionId, displayTitle });
+          }, false, annotationFor?.id === sessionId),
+          annotations.error ? renderTip(t("marks.error", { message: annotations.error }), h("button", { type: "button", className: "sm-headerBtn", "aria-label": t("marks.retry"), onClick: () => annotationStore.load(true) }, "!")) : null,
+
+          h("div", { className: "sm-headerSecondaryActions" },
+            renderTip(t ? t("row.move") : "移动至工作区", h("button", {
+              type: "button",
+              className: "sm-headerBtn" + (moveFor ? " sm-headerBtnActive" : ""),
+              "aria-label": t ? t("row.move") : "移动至工作区",
+              onClick: (e) => {
+                if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+                // Do NOT clear confirmFor / confirmAnchor here: opening the
+                // move popup must not silently dismiss a previously opened
+                // delete popup on the same session. The z-index counter
+                // (see nextDialogZ) handles stacking.
+                if (moveFor && moveFor.id === sessionId) {
+                  setMoveFor(null);
+                  setMoveAnchor(null);
+                } else {
+                  setMoveAnchor(anchorFor(e?.currentTarget, "move"));
+                  setMoveFor({ id: sessionId, displayTitle, workspaceId: "" });
+                }
+              }
+            },
+              h("span", { className: "sm-headerBtnIcon" }, HeaderMoveIcon()),
+              h("span", { className: "sm-headerBtnLabel" }, t ? t("row.move") : "移动至工作区")
+            )),
+            renderTip(t ? t("row.delete") : "删除会话", h("button", {
+              type: "button",
+              className: "sm-headerBtn sm-headerBtnDanger" + (confirmFor ? " sm-headerBtnActive" : ""),
+              "aria-label": t ? t("row.delete") : "删除会话",
+              onClick: (e) => {
+                if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+                // Do NOT clear moveFor / moveAnchor here: opening the delete
+                // popup must not silently dismiss a previously opened move
+                // popup on the same session. The z-index counter (see
+                // nextDialogZ) handles stacking.
+                if (confirmFor && confirmFor.id === sessionId) {
+                  setConfirmFor(null);
+                  setConfirmAnchor(null);
+                } else {
+                  setConfirmAnchor(anchorFor(e?.currentTarget, "delete"));
+                  setConfirmFor({ id: sessionId, displayTitle });
+                }
+              }
+            },
+              h("span", { className: "sm-headerBtnIcon" }, HeaderTrashIcon()),
+              h("span", { className: "sm-headerBtnLabel" }, t ? t("row.delete") : "删除会话")
+            ))
+          ),
+          h("div", { className: "sm-headerCompactMenu" + (moreOpen ? " sm-headerCompactMenuOpen" : ""), ref: moreBtnRef },
+            renderTip((t && t("header.more")) || "更多操作", h("button", {
+              ref: moreBtnElRef,
+              type: "button",
+              className: "sm-headerBtn sm-headerCompactMenuBtn" + (moreOpen ? " sm-headerBtnActive" : ""),
+              "aria-label": (t && t("header.more")) || "更多操作",
+              "aria-haspopup": "menu",
+              "aria-expanded": moreOpen,
+              onClick: (e) => {
+                if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+                setMoreOpen(v => !v);
+              }
+            },
+              h("span", { className: "sm-headerBtnIcon" }, HeaderEllipsisIcon())
+            )),
+            moreOpen ? h("div", { className: "sm-headerMenu", role: "menu", style: menuStyle },
+              (onArchive || onUnarchive) ? h("button", {
+                type: "button",
+                className: "sm-headerMenuItem sm-headerMenuUltraOnly",
+                role: "menuitem",
+                onClick: () => {
+                  setMoreOpen(false);
+                  runWithAlert("archive", () => isArchived ? onUnarchive(sessionId) : onArchive(sessionId));
+                }
+              },
+                h("span", { className: "sm-headerBtnIcon" }, HeaderArchiveIcon({ unarchive: isArchived })),
+                h("span", null, isArchived ? (t ? t("row.unarchive") : "移出归档") : (t ? t("row.archive") : "归档"))
+              ) : null,
+              h("button", {
+                type: "button",
+                className: "sm-headerMenuItem sm-headerMenuUltraOnly",
+                role: "menuitem",
+                disabled: isAnnotationBusy,
+                onClick: () => {
+                  setMoreOpen(false);
+                  runWithAlert("annotations", () => annotationStore.save(sessionId, { favorite: !currentAnnotation.favorite }));
+                }
+              },
+                h("span", { className: "sm-headerBtnIcon" }, HeaderStarIcon({ filled: currentAnnotation.favorite })),
+                h("span", null, t ? t(currentAnnotation.favorite ? "marks.favorite.remove" : "marks.favorite.add") : (currentAnnotation.favorite ? "取消收藏" : "收藏会话"))
+              ),
+              h("button", {
+                type: "button",
+                className: "sm-headerMenuItem sm-headerMenuUltraOnly",
+                role: "menuitem",
+                disabled: isAnnotationBusy,
+                onClick: () => {
+                  setMoreOpen(false);
+                  runWithAlert("annotations", () => annotationStore.save(sessionId, { reviewLater: !currentAnnotation.reviewLater }));
+                }
+              },
+                h("span", { className: "sm-headerBtnIcon" }, HeaderClockIcon()),
+                h("span", null, t ? t(currentAnnotation.reviewLater ? "marks.review.remove" : "marks.review.add") : (currentAnnotation.reviewLater ? "取消稍后回看" : "稍后回看"))
+              ),
+              h("button", {
+                type: "button",
+                className: "sm-headerMenuItem",
+                role: "menuitem",
+                onClick: () => {
+                  const anchorEl = getMoreBtn() || moreBtnRef.current;
+                  setMoreOpen(false);
+                  const nextOpen = !(annotationFor && annotationFor.id === sessionId);
+                  if (nextOpen && anchorEl) {
+                    setAnnotationAnchor(anchorFor(anchorEl, "annotation"));
+                  } else setAnnotationAnchor(null);
+                  setAnnotationFor(curr => (curr?.id === sessionId ? null : { id: sessionId, displayTitle }));
+                }
+              },
+                h("span", { className: "sm-headerBtnIcon" }, HeaderTagIcon()),
+                h("span", null, t ? t("marks.header.edit") : "标签/备注")
+              ),
+              h("button", {
+                type: "button",
+                className: "sm-headerMenuItem",
+                role: "menuitem",
+                onClick: () => {
+                  const anchorEl = getMoreBtn() || moreBtnRef.current;
+                  setMoreOpen(false);
+                  if (moveFor && moveFor.id === sessionId) {
+                    setMoveFor(null);
+                    setMoveAnchor(null);
+                  } else {
+                    setMoveAnchor(anchorFor(anchorEl, "move"));
+                    setMoveFor({ id: sessionId, displayTitle, workspaceId: "" });
+                  }
+                }
+              },
+                h("span", { className: "sm-headerBtnIcon" }, HeaderMoveIcon()),
+                h("span", null, t ? t("row.move") : "移动至工作区")
+              ),
+              h("button", {
+                type: "button",
+                className: "sm-headerMenuItem sm-headerMenuItemDanger",
+                role: "menuitem",
+                onClick: () => {
+                  const anchorEl = getMoreBtn() || moreBtnRef.current;
+                  setMoreOpen(false);
+                  if (confirmFor && confirmFor.id === sessionId) {
+                    setConfirmFor(null);
+                    setConfirmAnchor(null);
+                  } else {
+                    setConfirmAnchor(anchorFor(anchorEl, "delete"));
+                    setConfirmFor({ id: sessionId, displayTitle });
+                  }
+                }
+              },
+                h("span", { className: "sm-headerBtnIcon" }, HeaderTrashIcon()),
+                h("span", null, t ? t("row.delete") : "删除会话")
+              )
+            ) : null
+          )
+        ),
+        confirmFor === null ? null : h(ConfirmDialog, {
+          open: true,
+          anchor: confirmAnchor,
+          onClose: () => setConfirmFor(null),
+          onCancel: () => setConfirmFor(null),
+          onConfirm: () => {
+            if (confirmPreviewState.loading || confirmPreviewState.error) return;
+            const target = confirmFor;
+            setConfirmFor(null);
+            runWithAlert("delete", () => onRemove(target.id));
+          },
+          title: t ? t("confirm.delete.title") : "删除会话",
+          description: (confirmFor && confirmFor.displayTitle && (t ? t("confirm.delete.desc", { title: confirmFor.displayTitle }) : ("「" + confirmFor.displayTitle + "」：删除，不可恢复"))) || "",
+          warning: (() => {
+            const baseWarn = (confirmFor && confirmFor.running && t ? t("confirm.delete.running") + " " : "") +
+              (t ? t("bulk.dialog.warning.delete") : "删除操作不可撤销，请确认后再继续。");
+            if (confirmPreviewState.loading) {
+              const loadingMsg = (t ? t("confirm.delete.previewLoading") : "") || "正在检查关联的子智能体会话…";
+              return `${loadingMsg}\n${baseWarn}`;
+            }
+            if (confirmPreviewState.error) {
+              const errorMsg = confirmPreviewState.error;
+              return `${errorMsg}\n${baseWarn}`;
+            }
+            const subagentsWarn = confirmPreviewState.subagentCount > 0
+              ? (t ? t("confirm.delete.subagents", { count: confirmPreviewState.subagentCount }) : `将连带删除 ${confirmPreviewState.subagentCount} 个关联的子智能体会话。`)
+              : "";
+            return subagentsWarn ? `${subagentsWarn}\n${baseWarn}` : baseWarn;
+          })(),
+          confirmDisabled: confirmPreviewState.loading || Boolean(confirmPreviewState.error),
+          confirmLabel: t ? t("confirm.delete.confirm") : "确认删除",
+          cancelLabel: t ? t("confirm.cancel") : "取消",
+          busy: false,
+          danger: true
+        }),
+        moveFor === null ? null : h(MoveDialog, {
+          open: true,
+          anchor: moveAnchor,
+          t: t,
+          workspaces: workspaces,
+          currentWorkspaceId: moveFor.workspaceId || currentWorkspaceId || "",
+          onClose: () => { setMoveFor(null); setMoveAnchor(null); },
+          onCancel: () => { setMoveFor(null); setMoveAnchor(null); },
+          title: t ? t("confirm.move.title") : "移动会话到工作区",
+          description: (moveFor && moveFor.displayTitle && (t ? t("confirm.move.desc", { title: moveFor.displayTitle }) : "")) || "",
+          confirmLabel: t ? t("confirm.move.confirm") : "确认移动",
+          cancelLabel: t ? t("confirm.cancel") : "取消",
+          busy: false,
+          onConfirm: (targetWorkspaceId) => {
+            const target = moveFor;
+            setMoveFor(null);
+            setMoveAnchor(null);
+            runWithAlert("move", () => onMove(target.id, targetWorkspaceId));
+          }
+        })
+      );
+    }
+
+    class SafePanel extends React.Component {
+      constructor(p) { super(p); this.state = { failed: false, error: null }; }
+      static getDerivedStateFromError(error) { return { failed: true, error }; }
+      componentDidCatch(error) { try { console.error("[dsh-session-manager] SessionManagerPanel crashed:", error); } catch (_) {} }
+      render() {
+        if (this.state.failed) {
+          const t = typeof this.props.t === "function" ? this.props.t : (k => k);
+          const errorOverlay = renderInOverlay(h("div", { className: "sm-overlayLayer" },
+            h("div", { className: "sm-nativeDialogLayer" },
+              h("div", { className: "sm-nativeDialog sm-panelDialog", style: { padding: "20px" } },
+                h("h3", null, t("panel.title") || "会话管理"),
+                h("div", { className: "sm-error" }, "面板加载出错: " + (this.state.error?.message || String(this.state.error))),
+                h("button", {
+                  type: "button",
+                  className: "sm-resetFilters",
+                  onClick: () => {
+                    this.setState({ failed: false, error: null });
+                    try { this.props.panelStore.set(false); } catch (_) {}
+                  }
+                }, t("confirm.cancel") || "关闭")
+              )
+            )
+          ));
+          return errorOverlay;
+        }
+        return h(SessionManagerPanel, {
+          open: true,
+          onClose: () => { try { this.props.panelStore.set(false); } catch (_) {} },
+          useSessions: this.props.useSessions || this.props.props?.useSessions,
+          useWorkspaces: this.props.useWorkspaces || this.props.props?.useWorkspaces,
+          t: this.props.t,
+          // Bulk operations need to refresh ctx.sessions.list and the
+          // workspace projection after /batch mutates disk state so the
+          // panel reflects the new layout.
+          onRefreshAfterBulk: async (...args) => {
+            try { await this.props.props?.onBulkRefresh?.(...args); } catch (_) { /* ignore */ }
+          },
+          onOpen: (id) => { try { this.props.panelStore.set(false); this.props.props?.onOpen?.(id); } catch (_) {} },
+          onArchive: this.props.props?.onArchive,
+          onUnarchive: this.props.props?.onUnarchive,
+          onRemove: this.props.props?.onRemove,
+          onMove: this.props.props?.onMove,
+          onMigrate: this.props.props?.onMigrate
+        });
+      }
+    }
+
+    function FooterAction(props) {
+      const t = typeof props.t === "function" ? props.t : (k => k);
+      const onOpenPanel = typeof props.onOpenPanel === "function" ? props.onOpenPanel : () => panelStore.toggle();
+      // props.wide comes from SidebarRoot via SidebarFooterActionOwnerProps.
+      // When the sidebar is collapsed into the 56px rail, render a 36x36
+      // icon-only button so the Chinese label does not word-wrap vertically
+      // (issue #16); when expanded, render a full-width row with icon +
+      // label, left-aligned to match neighbouring footer entries.
+      const wide = props.wide === true;
+      const open = useSyncExternalStore(
+        (cb) => panelStore.subscribe(cb),
+        () => panelStore.getSnapshot(),
+        () => panelStore.getSnapshot()
+      );
+      const updateState = useSyncExternalStore(
+        (cb) => updateStore.subscribe(cb),
+        () => updateStore.getSnapshot(),
+        () => updateStore.getSnapshot()
+      );
+      useEffect(() => {
+        try { updateStore.checkRecentStatus().catch(() => {}); } catch (_) {}
+      }, []);
+      const btnClass = "sm-footerBtn" + (wide ? " sm-footerBtn-wide" : " sm-footerBtn-rail");
+      const btnLabel = t("footer.aria");
+      return h(React.Fragment, null,
+        h("button", {
+          type: "button",
+          className: btnClass,
+          "aria-label": btnLabel,
+          title: wide ? undefined : btnLabel,
+          onClick: () => onOpenPanel()
+        },
+          h(P.IconArchiveOutlineRegular, { size: wide ? 14 : 18 }),
+          wide ? h("span", { className: "sm-footerBtn-label" }, t("footer.label")) : null
+        ),
+        open ? h(SafePanel, {
+          key: "sm-safe-panel",
+          panelStore: panelStore,
+          props: props,
+          t: t,
+          useSessions: props.useSessions,
+          useWorkspaces: props.useWorkspaces,
+        }) : null,
+        updateState.dialogOpen ? h(UpdateDialog, { t: t }) : null
+      );
+    }
+
+    function NpmIcon(props) {
+      const size = props.size || 16;
+      return h("svg", {
+        viewBox: "0 0 16 16",
+        width: size,
+        height: size,
+        fill: "currentColor",
+        "aria-hidden": "true",
+        style: { display: "block" }
+      },
+        h("path", {
+          fillRule: "evenodd",
+          d: "M0 0v16h16V0H0zm13 13h-2V5H8v8H3V3h10v10z"
+        })
+      );
+    }
+    const WhaleIcon = NpmIcon;
+
+    function CloseIcon(props) {
+      const size = props.size || 14;
+      return h("svg", {
+        viewBox: "0 0 16 16",
+        width: size,
+        height: size,
+        fill: "none",
+        stroke: "currentColor",
+        strokeWidth: "1.8",
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        "aria-hidden": "true",
+        style: { display: "block" }
+      },
+        h("path", { d: "M3.5 3.5l9 9M12.5 3.5l-9 9" })
+      );
+    }
+
+    function StarIcon(props) {
+      const size = props.size || 14;
+      return h("svg", {
+        viewBox: "0 0 16 16",
+        width: size,
+        height: size,
+        fill: "#eac54f",
+        "aria-hidden": "true",
+        style: { display: "block" }
+      },
+        h("path", {
+          d: "M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25z"
+        })
+      );
+    }
+
+    function IssueIcon(props) {
+      const size = props.size || 14;
+      return h("svg", {
+        viewBox: "0 0 16 16",
+        width: size,
+        height: size,
+        fill: "currentColor",
+        "aria-hidden": "true",
+        style: { display: "block" }
+      },
+        h("path", {
+          fillRule: "evenodd",
+          d: "M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm9 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-.25-6.25a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 1.5 0v-3.5z"
+        })
+      );
+    }
+
+    function UpdateDialog(props) {
+      const t = props.t || ((k) => k);
+      const updateState = useSyncExternalStore(
+        (cb) => updateStore.subscribe(cb),
+        () => updateStore.getSnapshot(),
+        () => updateStore.getSnapshot()
+      );
+
+      const status = updateState.status;
+      const isUpdating = status === "updating";
+      const isDone = status === "done";
+      const isError = status === "error";
+      const isAvailable = status === "available";
+      const isChecking = status === "checking";
+      const isIdle = status === "idle";
+
+      let dialogTitle = t("update.title");
+      if (isAvailable) dialogTitle = t("update.newVersion");
+      else if (isUpdating) dialogTitle = t("update.installing");
+      else if (isDone) dialogTitle = t("update.done.title");
+      else if (isError) dialogTitle = updateState.rollbackInfo ? t("update.rolledBack.title") : t("update.error");
+
+      const handleClose = () => {
+        if (!isUpdating) {
+          updateStore.closeDialog();
+        }
+      };
+
+      return h(OverlayLayer, {
+        className: "sm-updateDialogLayer",
+        onBackdropClick: handleClose,
+        onKeyDown: (e) => {
+          if (e.key === "Escape" && !isUpdating) handleClose();
+        }
+      },
+        h("section", {
+          className: "sm-nativeDialog sm-updateDialog",
+          style: { pointerEvents: "auto" },
+          role: "dialog",
+          "aria-modal": "true",
+          "aria-labelledby": "sm-update-dialog-title"
+        },
+          h("div", { className: "sm-nativeDialogHeader" },
+            h("h3", { id: "sm-update-dialog-title", className: "sm-nativeDialogTitle" }, dialogTitle),
+            !isUpdating ? renderTip(t("update.btn.close"), h("button", {
+              type: "button",
+              className: "sm-panelHeaderClose",
+              "aria-label": t("update.btn.close"),
+              onClick: handleClose
+            }, h(CloseIcon, { size: 14 }))) : null
+          ),
+          h("div", { className: "sm-nativeDialogBody" },
+            (() => {
+              const runningV = updateState.currentVersion || updateState.runningVersion || CURRENT_VERSION;
+              const hasInstalledDiff = !!(updateState.installedVersion && compareSemver(updateState.installedVersion, runningV) > 0);
+              const targetV = hasInstalledDiff ? updateState.installedVersion : (updateState.latestVersion || runningV);
+              return h("div", { className: "sm-updateVersionGrid" },
+                h("span", { className: "sm-updateVersionLabel" }, hasInstalledDiff ? t("update.runningVersion") : t("update.currentVersion")),
+                h("span", { className: "sm-updateVersionValue" }, "v" + runningV),
+                h("span", { className: "sm-updateVersionLabel" }, hasInstalledDiff ? t("update.installedVersion") : t("update.latestVersion")),
+                h("span", { className: "sm-updateVersionValue" }, hasInstalledDiff
+                  ? ("v" + updateState.installedVersion)
+                  : (updateState.latestVersion ? "v" + updateState.latestVersion : (isChecking ? t("update.checking") : "-")))
+              );
+            })(),
+            (() => {
+              const runningV = updateState.currentVersion || updateState.runningVersion || CURRENT_VERSION;
+              const hasInstalledDiff = !!(updateState.installedVersion && compareSemver(updateState.installedVersion, runningV) > 0);
+              const targetV = hasInstalledDiff ? updateState.installedVersion : (updateState.latestVersion || runningV);
+              let statusBox = null;
+              if (isChecking) {
+                statusBox = h("div", { className: "sm-updateStatusBox sm-checking" }, t("update.checking"));
+              } else if (isUpdating) {
+                statusBox = h("div", { className: "sm-updateStatusBox sm-warn" }, t("update.installing"));
+              } else if (isDone) {
+                statusBox = h("div", { className: "sm-updateStatusBox sm-success", style: { textAlign: "left", whiteSpace: "pre-wrap" } },
+                  updateState.application === "applied" && runningV === targetV
+                    ? t("update.done.applied", { to: targetV, version: targetV })
+                    : (updateState.application === "refresh-required"
+                        ? t("update.done.refresh", { from: runningV, to: targetV })
+                        : t("update.done.restart", { from: runningV, to: targetV })
+                      )
+                );
+              } else if (isError) {
+                if (updateState.rollbackInfo) {
+                  statusBox = h("div", { className: "sm-updateStatusBox sm-warn", style: { textAlign: "left", whiteSpace: "pre-wrap" } },
+                    h("div", { style: { fontWeight: "bold", marginBottom: "4px" } },
+                      t("update.rolledBack.title")
+                    ),
+                    h("div", null,
+                      t("update.rolledBack", { version: updateState.rollbackInfo.currentVersion })
+                    ),
+                    h("div", { style: { marginTop: "4px", opacity: 0.9, fontSize: "12px" } },
+                      t("update.rolledBack.reason", { reason: updateState.rollbackInfo.reason })
+                    )
+                  );
+                } else {
+                  statusBox = h("div", { className: "sm-updateStatusBox sm-error", style: { textAlign: "left", whiteSpace: "pre-wrap" } },
+                    (updateState.error || t("update.error"))
+                  );
+                }
+              } else if (isAvailable) {
+                statusBox = h("div", { className: "sm-updateStatusBox sm-warn" }, t("update.newVersion") + " (v" + updateState.latestVersion + ")");
+              } else if (updateState.notes) {
+                statusBox = h("div", { className: "sm-updateStatusBox sm-warn" }, t(updateState.notes));
+              } else if (isIdle && updateState.latestVersion) {
+                statusBox = h("div", { className: "sm-updateStatusBox sm-success" }, t("update.isLatest"));
+              }
+              return statusBox || h("div", { className: "sm-updateStatusBox sm-placeholder", style: { visibility: "hidden" } }, "-");
+            })()
+          ),
+          h("div", { className: "sm-nativeDialogFooter" },
+            isAvailable ? h(React.Fragment, null,
+              h("button", {
+                type: "button",
+                className: "sm-nativeDialogButton sm-nativeDialogCancel",
+                onClick: handleClose
+              }, t("update.btn.later")),
+              h("button", {
+                type: "button",
+                className: "sm-nativeDialogButton sm-nativeDialogConfirm",
+                onClick: () => updateStore.startUpdate({ openDialog: true })
+              }, t("update.btn.update", { version: updateState.latestVersion }))
+            ) : null,
+            isUpdating ? h("button", {
+              type: "button",
+              className: "sm-nativeDialogButton sm-nativeDialogConfirm",
+              disabled: true
+            }, t("update.btn.updating")) : null,
+            isDone ? h("button", {
+              type: "button",
+              className: "sm-nativeDialogButton sm-nativeDialogConfirm",
+              onClick: handleClose
+            }, t("update.btn.done")) : null,
+            isError ? h(React.Fragment, null,
+              h("button", {
+                type: "button",
+                className: "sm-nativeDialogButton sm-nativeDialogCancel",
+                onClick: handleClose
+              }, t("update.btn.close")),
+              h("button", {
+                type: "button",
+                className: "sm-nativeDialogButton sm-nativeDialogConfirm",
+                onClick: () => {
+                  if (updateState.latestVersion && compareSemver(updateState.latestVersion, updateState.currentVersion) > 0) {
+                    updateStore.startUpdate({ openDialog: true });
+                  } else {
+                    updateStore.checkForUpdate({ manual: true, openDialog: true });
+                  }
+                }
+              }, t("update.btn.retry"))
+            ) : null,
+            (isIdle || isChecking) ? h(React.Fragment, null,
+              h("button", {
+                type: "button",
+                className: "sm-nativeDialogButton sm-nativeDialogCancel",
+                onClick: handleClose
+              }, t("update.btn.close")),
+              h("button", {
+                type: "button",
+                className: "sm-nativeDialogButton sm-nativeDialogConfirm",
+                disabled: isChecking,
+                style: { minWidth: "96px", whiteSpace: "nowrap" },
+                onClick: () => {
+                  if (!isChecking) updateStore.checkForUpdate({ manual: true, openDialog: true });
+                }
+              }, isChecking ? t("update.checking") : t("update.btn.check"))
+            ) : null
+          )
+        )
+      );
+    }
+
+    function SessionManagerSettingsCard(props) {
+      const t = props.t || ((k, v) => {
+        const dict = zh[k] || en[k] || k;
+        return dict.replace(/\{(\w+)\}/g, (_, name) => String(v?.[name] ?? ""));
+      });
+      const updateState = useSyncExternalStore(
+        (cb) => updateStore.subscribe(cb),
+        () => updateStore.getSnapshot(),
+        () => updateStore.getSnapshot()
+      );
+      const autoCheck = updateStore.getAutoCheck();
+
+      const isChecking = updateState.status === "checking";
+      const isUpdating = updateState.status === "updating";
+      const isAvailable = updateState.status === "available";
+
+      const onToggleAutoCheck = (e) => {
+        updateStore.setAutoCheck(e.target.checked);
+      };
+      const currentRegistry = updateStore.getRegistry();
+      const onRegistryChange = (e) => {
+        updateStore.setRegistry(e.target.value);
+      };
+      // Dialog opacity reads straight from the shared preference store, so
+      // moving the slider updates every plugin dialog immediately.
+      const dialogOpacity = updateStore.getDialogOpacity();
+      const onDialogOpacityChange = (e) => {
+        updateStore.setDialogOpacity(e.target.value);
+      };
+
+      useEffect(() => {
+        try { updateStore.checkRecentStatus().catch(() => {}); } catch (_) {}
+      }, []);
+
+      const runningV = updateState.currentVersion || updateState.runningVersion || CURRENT_VERSION;
+      const hasInstalledDiff = !!(updateState.installedVersion && compareSemver(updateState.installedVersion, runningV) > 0);
+      const targetV = hasInstalledDiff ? updateState.installedVersion : (updateState.latestVersion || runningV);
+
+      return h("div", { className: "sm-settingsCard" },
+        h("div", { className: "sm-settingsHeader" },
+          h("h3", { className: "sm-settingsTitle" },
+            h(NpmIcon, { size: 18 }),
+            h("span", null, t("settings.title")),
+            h("span", { className: "sm-settingsTag" }, "v" + runningV)
+          )
+        ),
+        h("div", { className: "sm-settingsSection" },
+          h("div", { className: "sm-settingsSectionHeader" },
+            h("div", { className: "sm-settingsSectionTitle" }, t("settings.versionSection")),
+            h("div", { className: "sm-settingsVersionActions" },
+              h("button", {
+                type: "button",
+                className: "sm-nativeDialogButton sm-settingsCheckBtn",
+                disabled: isChecking || isUpdating,
+                onClick: () => updateStore.checkForUpdate({ manual: true, openOnFound: false, openDialog: false })
+              }, isChecking ? t("update.checking") : t("update.btn.check")),
+              isAvailable ? h("button", {
+                type: "button",
+                className: "sm-nativeDialogButton sm-nativeDialogConfirm sm-settingsCheckBtn",
+                disabled: isUpdating,
+                onClick: () => updateStore.startUpdate({ openDialog: true })
+              }, isUpdating ? t("update.btn.updating") : t("update.btn.update", { version: updateState.latestVersion })) : null
+            )
+          ),
+          h("div", { className: "sm-settingsRow" },
+            h("span", null, hasInstalledDiff ? t("update.runningVersion") : t("update.currentVersion")),
+            h("span", { style: { fontFamily: "monospace" } }, "v" + runningV)
+          ),
+          hasInstalledDiff ? h("div", { className: "sm-settingsRow" },
+            h("span", null, t("update.installedVersion")),
+            h("span", { style: { fontFamily: "monospace" } }, "v" + updateState.installedVersion)
+          ) : null,
+          h("div", { className: "sm-settingsRow" },
+            h("span", null, t("update.latestVersion")),
+            h("span", { style: { fontFamily: "monospace" } },
+              updateState.latestVersion ? "v" + updateState.latestVersion : (isChecking ? t("update.checking") : "-")
+            )
+          ),
+          updateState.notes ? h("div", { className: "sm-updateStatusBox sm-warn" },
+            t(updateState.notes)
+          ) : null,
+          updateState.status === "available" ? h("div", { className: "sm-updateStatusBox sm-warn" },
+            t("update.newVersion") + " (v" + updateState.latestVersion + ")"
+          ) : null,
+          updateState.status === "updating" ? h("div", { className: "sm-updateStatusBox sm-warn" },
+            t("update.installing")
+          ) : null,
+          updateState.status === "done" ? h("div", { className: "sm-updateStatusBox sm-success", style: { whiteSpace: "pre-wrap" } },
+            updateState.application === "applied" && runningV === targetV
+              ? t("update.done.applied", { to: targetV, version: targetV })
+              : (updateState.application === "refresh-required"
+                  ? t("update.done.refresh", { from: runningV, to: targetV })
+                  : t("update.done.restart", { from: runningV, to: targetV })
+                )
+          ) : null,
+          updateState.status === "error" ? h("div", {
+            className: "sm-updateStatusBox " + (updateState.rollbackInfo ? "sm-warn" : "sm-error"),
+            style: { whiteSpace: "pre-wrap" }
+          },
+            updateState.rollbackInfo
+              ? (t("update.rolledBack", { version: updateState.rollbackInfo.currentVersion }) + "\n" + t("update.rolledBack.reason", { reason: updateState.rollbackInfo.reason }))
+              : (updateState.error || t("update.error"))
+          ) : null
+        ),
+        h("div", { className: "sm-settingsSection" },
+          h("div", { className: "sm-settingsSectionTitle" }, t("settings.prefSection")),
+          h("div", { className: "sm-settingsRow" },
+            h("span", null, t("update.autoCheck")),
+            h("label", { className: "sm-settingsCheckbox" },
+              h("input", {
+                type: "checkbox",
+                checked: autoCheck,
+                onChange: onToggleAutoCheck,
+                "aria-label": t("update.autoCheck")
+              }),
+              h("span", null, t("update.autoCheck.enable"))
+            )
+          ),
+          h("div", { className: "sm-settingsRow" },
+            h("span", null, t("settings.registry")),
+            h("select", {
+              className: "sm-settingsSelect",
+              value: currentRegistry,
+              onChange: onRegistryChange,
+              "aria-label": t("settings.registry")
+            },
+              h("option", { value: "registry.npmjs.org" }, t("settings.registry.npm")),
+              h("option", { value: "registry.npmmirror.com" }, t("settings.registry.china")),
+              h("option", { value: "127.0.0.1:4873" }, t("settings.registry.local"))
+            )
+          ),
+          h("div", { className: "sm-settingsRow" },
+            h("div", { className: "sm-settingsRowLeft" },
+              h("span", null, t("settings.dialogOpacity")),
+              h("span", { className: "sm-settingsHint sm-settingsHintInline" }, t("settings.dialogOpacity.hint"))
+            ),
+            h("div", { className: "sm-settingsSlider" },
+              h("input", {
+                type: "range",
+                className: "sm-settingsRange",
+                min: updateStore.DIALOG_OPACITY.min,
+                max: updateStore.DIALOG_OPACITY.max,
+                step: updateStore.DIALOG_OPACITY.step,
+                value: dialogOpacity,
+                "aria-label": t("settings.dialogOpacity"),
+                "aria-valuemin": updateStore.DIALOG_OPACITY.min,
+                "aria-valuemax": updateStore.DIALOG_OPACITY.max,
+                "aria-valuenow": dialogOpacity,
+                "aria-valuetext": t("settings.dialogOpacity.value", { value: dialogOpacity }),
+                onChange: onDialogOpacityChange
+              }),
+              h("span", { className: "sm-settingsRangeValue" }, t("settings.dialogOpacity.value", { value: dialogOpacity })),
+              h("button", {
+                type: "button",
+                className: "sm-settingsResetBtn",
+                disabled: dialogOpacity === updateStore.DIALOG_OPACITY.default,
+                onClick: () => updateStore.resetDialogOpacity()
+              }, t("settings.dialogOpacity.reset"))
+            )
+          )
+        ),
+        h("div", { className: "sm-settingsSection" },
+          h("div", { className: "sm-settingsSectionTitle" }, t("settings.projectSection")),
+          h("div", { className: "sm-settingsRow" },
+            h("div", { className: "sm-settingsProjectLeft" },
+              h("span", { className: "sm-settingsProjectLabel" }, t("settings.github")),
+              h("a", {
+                href: "https://github.com/hkkz9522/dsh-session-manager",
+                target: "_blank",
+                rel: "noopener noreferrer",
+                className: "sm-settingsLink"
+              }, "hkkz9522/dsh-session-manager")
+            ),
+            h("div", { className: "sm-settingsBadgeActions" },
+              renderTip(t("settings.star.tip"), h("a", {
+                href: "https://github.com/hkkz9522/dsh-session-manager",
+                target: "_blank",
+                rel: "noopener noreferrer",
+                className: "sm-settingsBadgeLink",
+                "aria-label": t("settings.star.tip")
+              },
+                h(StarIcon, { size: 14 }),
+                h("span", null, t("settings.star"))
+              )),
+              renderTip(t("settings.feedback.tip"), h("a", {
+                href: "https://github.com/hkkz9522/dsh-session-manager/issues",
+                target: "_blank",
+                rel: "noopener noreferrer",
+                className: "sm-settingsBadgeLink",
+                "aria-label": t("settings.feedback.tip")
+              },
+                h(IssueIcon, { size: 14 }),
+                h("span", null, t("settings.feedback"))
+              ))
+            )
+          )
+        )
+      );
+    }
+
+    function apply(ctx) {
+      activeClientCtx = ctx;
+      ctx.effect(() => {
+        const refresh = () => { if (annotationStore.hasSubscribers()) void annotationStore.load(true); };
+        window.addEventListener("focus", refresh);
+        let channel;
+        try {
+          if (typeof BroadcastChannel === "function") {
+            channel = new BroadcastChannel("dsh-session-manager-annotations-v1");
+            channel.onmessage = event => { if (event.data?.type === "changed") refresh(); };
+            annotationStore.notify = () => channel.postMessage({ type: "changed" });
+          }
+        } catch (_) { /* unavailable browser messaging: focus refresh still works */ }
+        return () => { window.removeEventListener("focus", refresh); channel?.close(); annotationStore.notify = null; };
+      }, "session-manager: annotation synchronization");
+      ctx.effect(() => ctx.locale.register(NS, { zh, en }), "session-manager: dictionaries");
+      const getCurrentSessionId = () => {
+        try {
+          const id = ctx.uiWorkspace?.mainReference?.sessionId
+            || ctx.uiWorkspace?.selection?.getSnapshot?.()?.sessionId
+            || ctx.sessions?.list?.getSnapshot?.()?.current;
+          return typeof id === "string" && id ? id : null;
+        } catch (_) {
+          return null;
+        }
+      };
+
+      const isCurrentSession = (id) => {
+        if (!id) return false;
+        return getCurrentSessionId() === id;
+      };
+
+      const clearCurrentSession = () => {
+        const uiWorkspace = ctx.uiWorkspace;
+        if (uiWorkspace && typeof uiWorkspace.clearMain === "function") {
+          try { uiWorkspace.clearMain(); } catch (_) {}
+        } else if (uiWorkspace && typeof uiWorkspace.startSession === "function") {
+          try { uiWorkspace.startSession(); } catch (_) {}
+        }
+        if (ctx.sessions && typeof ctx.sessions.clear === "function") {
+          try { ctx.sessions.clear(); } catch (_) {}
+        }
+      };
+
+      const actions = () => ({
+        // DSH 0.1.6+ removed ctx.sessions.open(); the navigation owner is
+        // `ctx.uiWorkspace.openSession()`, and the bare SessionController only
+        // exposes `retain()`. Pick the live surface so the row's "Open" button
+        // actually navigates on every supported host build.
+        onOpen: (sessionId) => {
+          const uiWorkspace = ctx.uiWorkspace;
+          if (uiWorkspace && typeof uiWorkspace.openSession === "function") {
+            uiWorkspace.openSession(sessionId);
+            return;
+          }
+          const sessions = ctx.sessions;
+          if (sessions && typeof sessions.retain === "function") {
+            // The bare retain() returns a SessionReference whose release()
+            // tears down the in-memory binding; the user normally expects the
+            // session to stay open, so a header-less build simply keeps it.
+            sessions.retain(sessionId, { source: "mainView" });
+            return;
+          }
+          throw new Error("session-manager: no Session open API on this DSH host");
+        },
+        onArchive: async (sessionId) => {
+          // DSH's own archive command (uiWorkspace -> workspaces -> the host API)
+          // keeps the client workspace model, the pin set and the main view in
+          // step; the plugin endpoint is only the fallback (issue #26).
+          await runArchiveCommand("archive", sessionId);
+        },
+        onUnarchive: async (sessionId) => {
+          for (const [, rec] of workspaceArchiveStore.getAllRecords()) {
+            if (rec.archived === true && Array.isArray(rec.sessionIds) && rec.sessionIds.includes(sessionId)) {
+              if (typeof window !== "undefined" && typeof window.alert === "function") {
+                const msg = (typeof t === "function" ? t("error.workspaceArchived") : null) || "所属工作区已归档，无法取消归档该会话。请先在工作区管理中恢复工作区。";
+                window.alert(msg);
+              }
+              return;
+            }
+          }
+          // DSH ships the inverse command in 0.2.x; the old assumption that only
+          // archive existed is what made unarchive bypass client state.
+          await runArchiveCommand("unarchive", sessionId);
+        },
+        onRemove: async (sessionId) => {
+          const wasCurrent = isCurrentSession(sessionId);
+          const response = await callApi("/delete", { sessionId });
+          if (!response.ok) {
+            if (Array.isArray(response.deletedSubagents) && response.deletedSubagents.length > 0) {
+              try { await annotationStore.load(true); } catch (_) {}
+              try { await ctx.sessions?.refresh?.(); } catch (_) {}
+              try { await ctx.workspaces?.refresh?.(); } catch (_) {}
+            }
+            const err = new Error(response.error || "delete failed");
+            err.deletedSubagents = response.deletedSubagents || [];
+            err.remainingSessions = response.remainingSessions || [sessionId];
+            err.partialFailure = Boolean(response.partialFailure);
+            throw err;
+          }
+          await annotationStore.load(true);
+          if (response.result?.warning) window.alert(response.result.warning);
+          if (wasCurrent || isCurrentSession(sessionId)) {
+            clearCurrentSession();
+          }
+          try { await ctx.sessions?.refresh?.(); } catch (_) {}
+          try { await ctx.workspaces?.refresh?.(); } catch (_) {}
+        },
+        onMove: async (sessionId, targetWorkspaceId) => {
+          const wasCurrent = ctx.sessions.list.getSnapshot().current === sessionId;
+          const response = await callApi("/move", { sessionId, targetWorkspaceId });
+          if (!response.ok) throw new Error(response.error || "move failed");
+          if (response.result?.restartRequired) {
+            try {
+              const msg = (typeof t === "function" ? t("move.restartRequired") : null) || "会话已成功移动至目标工作区，但当前工作目录需要在重启 DSH 后生效。";
+              window.alert(msg);
+            } catch (_) {}
+          }
+          const refreshMovedSession = async () => {
+            await Promise.allSettled([
+              typeof ctx.workspaces?.refresh === "function" ? ctx.workspaces.refresh() : Promise.resolve(),
+              ctx.sessions.refresh()
+            ]);
+            if (wasCurrent && ctx.sessions.list.getSnapshot().byId[sessionId] !== undefined) {
+              ctx.sessions.open(sessionId);
+            }
+          };
+          // The 0.4.6+ move path keeps the live agent/session intact (no
+          // session/disposed, no half-resumed Session object), so the chat
+          // panel keeps the in-memory session as active. We still refresh
+          // the workspace + session-list projections so the destination
+          // workspace and the moved row appear without a manual refresh.
+          await refreshMovedSession();
+          setTimeout(() => { void refreshMovedSession(); }, 250);
+          setTimeout(() => { void refreshMovedSession(); }, 900);
+        },
+        onMigrate: async (sessionId, toPreset) => {
+          const wasCurrent = ctx.sessions.list.getSnapshot().current === sessionId;
+          const response = await callApi("/preset-migrate", { sessionId, toPreset });
+          if (!response.ok) throw new Error(response.error || "preset migration failed");
+          // The current DSH client session store derives agentPreset from
+          // the refreshed projection; older builds exposed noteAgentPreset,
+          await ctx.sessions.refresh();
+          // The migrate rewrite happens in-process on the live session, so
+          // we just need a delayed baseline to let the api-gateway's projection
+          // settle before re-activating the in-memory session.
+          setTimeout(() => {
+            void ctx.sessions.refresh().then(() => {
+              if (wasCurrent) ctx.sessions.open(sessionId);
+            }).catch(() => {});
+          }, 250);
+        },
+        onOpenPanel: () => panelStore.toggle(),
+        onBulkRefresh: async (action, meta) => {
+          const currentBefore = getCurrentSessionId();
+          if (action === "delete" || action === "archive") {
+            const items = meta?.items || meta?.result?.items || [];
+            const successIds = items
+              .filter(item => item && (item.status === "success" || item.ok === true))
+              .map(item => item.sessionId);
+            const batchIds = (lastBatchContext.action === action && Array.isArray(lastBatchContext.ids)) ? lastBatchContext.ids : [];
+            const candidateIds = successIds.length > 0 ? successIds : (meta?.ids || batchIds);
+            if (candidateIds.some(isCurrentSession)) {
+              clearCurrentSession();
+            }
+          }
+          try { await ctx.sessions?.refresh?.(); } catch (_) { /* ignore */ }
+          try { await ctx.workspaces?.refresh?.(); } catch (_) { /* ignore */ }
+          if (currentBefore && (action === "delete" || action === "archive")) {
+            const sessionsSnapshot = ctx.sessions?.list?.getSnapshot?.();
+            const workspacesSnapshot = ctx.workspaces?.list?.getSnapshot?.();
+            const deleted = sessionsSnapshot?.byId && sessionsSnapshot.byId[currentBefore] === undefined;
+            const archived = Array.isArray(workspacesSnapshot?.archivedSessionIds) && workspacesSnapshot.archivedSessionIds.includes(currentBefore);
+            if (deleted || archived) {
+              clearCurrentSession();
+            }
+          }
+        },
+        useSessions: (selector = s => s) => useSyncExternalStore(
+          (cb) => (ctx.sessions?.list?.subscribe ? ctx.sessions.list.subscribe(cb) : () => {}),
+          () => (ctx.sessions?.list?.getSnapshot ? selector(ctx.sessions.list.getSnapshot()) : selector({ ids: [], byId: {} })),
+          () => (ctx.sessions?.list?.getSnapshot ? selector(ctx.sessions.list.getSnapshot()) : selector({ ids: [], byId: {} }))
+        ),
+        useWorkspaces: (selector = s => s) => useSyncExternalStore(
+          (cb) => (ctx.workspaces?.list?.subscribe ? ctx.workspaces.list.subscribe(cb) : () => {}),
+          () => (ctx.workspaces?.list?.getSnapshot ? selector(ctx.workspaces.list.getSnapshot()) : selector({ items: [] })),
+          () => (ctx.workspaces?.list?.getSnapshot ? selector(ctx.workspaces.list.getSnapshot()) : selector({ items: [] }))
+        ),
+      });
+      ctx.slots.inject("conversation.session.header.actions", () => ctx.slots.register({
+        name: "conversation.session.header.actions",
+        id: "session-manager-header",
+        order: 0,
+        locale: NS,
+        inject: () => actions()
+      }, HeaderAction));
+      ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register({
+        name: "sidebar.footer.action",
+        id: "session-manager-footer",
+        order: 30,
+        locale: NS,
+        inject: () => actions()
+      }, FooterAction));
+      ctx.slots.inject("plugins.bundle.config", () => ctx.slots.register({
+        name: "plugins.bundle.config",
+        id: "dsh-session-manager-bundle-config",
+        key: "dsh-session-manager",
+        locale: NS,
+        inject: () => actions()
+      }, (ownerProps = {}) => (ownerProps?.view === "summary" ? null : h(SessionManagerSettingsCard, ownerProps))));
+
+      try {
+        if (typeof ctx.inject === "function") {
+          ctx.inject(["settingsScope"], (scoped) => {
+            if (scoped && scoped.slots) {
+              scoped.slots.inject("settings.plugin.item", () => scoped.slots.register({
+                name: "settings.plugin.item",
+                id: "session-manager-settings-scoped",
+                key: "dsh-session-manager",
+                locale: NS,
+                inject: () => actions()
+              }, SessionManagerSettingsCard));
+            }
+          });
+        }
+      } catch (_) {}
+
+      ctx.slots.inject("settings.plugin.item", () => ctx.slots.register({
+        name: "settings.plugin.item",
+        id: "session-manager-settings",
+        key: "dsh-session-manager",
+        order: 50,
+        locale: NS,
+        inject: () => actions()
+      }, SessionManagerSettingsCard));
+
+      ctx.effect(() => {
+        try {
+          updateStore.checkRecentStatus().catch(() => {});
+        } catch (_) {}
+      }, "session-manager: check update status on boot");
+
+      ctx.effect(() => {
+        if (!updateStore.getAutoCheck()) return;
+        const timer = setTimeout(() => {
+          updateStore.maybeAutoCheck({ isStartup: true }).catch(() => {});
+        }, 1500);
+        return () => {
+          try {
+            if (typeof clearTimeout === "function") clearTimeout(timer);
+            else if (typeof window !== "undefined" && typeof window.clearTimeout === "function") window.clearTimeout(timer);
+          } catch (_) {}
+        };
+      }, "session-manager: auto update check");
+
+      ctx.effect(() => {
+        const disposes = [];
+        if (ctx.workspaces?.list) {
+          const d = workspaceArchiveStore.installWorkspaceModel(ctx.workspaces.list);
+          if (typeof d === "function") disposes.push(d);
+        }
+        if (ctx.workspaces) {
+          const d = workspaceArchiveStore.installWorkspaceCreate(ctx.workspaces);
+          if (typeof d === "function") disposes.push(d);
+        }
+        if (ctx.uiWorkspace) {
+          const d = workspaceArchiveStore.installConnectWorkspace(ctx.uiWorkspace);
+          if (typeof d === "function") disposes.push(d);
+        }
+        return () => {
+          for (const d of disposes) {
+            try { d(); } catch (_) {}
+          }
+        };
+      }, "session-manager: workspace sidebar hide");
+
+      ctx.effect(() => {
+        const off = installCustomDropdownInterceptor();
+        return () => {
+          try { if (typeof off === "function") off(); } catch (_) {}
+        };
+      }, "session-manager: custom select popups");
+
+      // Keep <html data-sm-theme> in step with DSH through the official theme
+      // event. ui-layout's ThemePresenter subscribes to the same event and
+      // writes documentElement.colorScheme plus body[data-ds-dark-theme], so
+      // this is the authoritative change signal; the DOM observer above still
+      // covers plain attribute flips, and a theme whose tokens change without
+      // touching an observed attribute would otherwise leave the mirror stale.
+      // The mirror only feeds two cosmetic branches (the token-less opacity
+      // fallback and the priority colours) -- native UA chrome is DSH's job.
+      try {
+        if (typeof ctx.on === "function") {
+          ctx.effect(() => {
+            const off = ctx.on("theme/change", () => smApplyTheme());
+            return () => { try { if (typeof off === "function") off(); } catch (_) {} };
+          }, "session-manager: theme mirror");
+        }
+      } catch (_) { /* theme service absent: the DOM observer is enough */ }
+    }
+
+    const inject = ["slots", "sessions", "workspaces", "locale", "uiWorkspace"];
+
+    exports.apply = apply;
+    exports.inject = inject;
+    exports.updateStore = updateStore;
+    exports.panelStore = panelStore;
+    exports.compareSemver = compareSemver;
+    exports.OverlayLayer = OverlayLayer;
+    exports.UpdateDialog = UpdateDialog;
+    exports.ConfirmDialog = ConfirmDialog;
+    exports.MoveDialog = MoveDialog;
+    exports.MigratePresetDialog = MigratePresetDialog;
+    exports.BatchPreviewDialog = BatchPreviewDialog;
+    exports.BatchResultDialog = BatchResultDialog;
+    exports.BulkTagInputDialog = BulkTagInputDialog;
+    exports.BulkChoiceDialog = BulkChoiceDialog;
+    exports.AnnotationDialog = AnnotationDialog;
+    exports.SessionManagerSettingsCard = SessionManagerSettingsCard;
+    exports.WhaleIcon = WhaleIcon;
+    exports.NpmIcon = NpmIcon;
+    exports.CloseIcon = CloseIcon;
+    exports.StarIcon = StarIcon;
+    exports.IssueIcon = IssueIcon;
+    exports.workspaceArchiveStore = workspaceArchiveStore;
+    exports.SmSwitch = SmSwitch;
+    exports.executeArchiveWorkspace = executeArchiveWorkspace;
+    exports.executeUnarchiveWorkspace = executeUnarchiveWorkspace;
+    exports.openCustomSelect = openCustomSelect;
+    exports.closeCustomSelect = closeCustomSelect;
+    exports.installCustomDropdownInterceptor = installCustomDropdownInterceptor;
+    exports.getTargetSmSelect = getTargetSmSelect;
+    exports.SM_SELECT_SELECTOR = SM_SELECT_SELECTOR;
+    return module.exports;
+  }
+});

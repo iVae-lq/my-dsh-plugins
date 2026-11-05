@@ -1,0 +1,4 @@
+# dsh-tab 的 profile 层补丁：只插入自己一行，不覆盖任何官方行。
+- insert:
+    - id: dsh-tab
+      name: 'dsh-tab'

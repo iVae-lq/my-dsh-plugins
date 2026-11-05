@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Conversation Tabs",
+    "description": "A full-width row of book-style conversation tabs above the conversation area: the selected tab merges into the page below; + starts a conversation; right-click closes tabs to the right, closes all, pins a tab, or archives the conversation."
+  }
+}

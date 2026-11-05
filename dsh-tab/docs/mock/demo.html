@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dsh-tab 演示截图（模拟数据）</title>
+<style>
+:root{  --dsw-alias-bg-base: #fff;
+  --dsw-alias-bg-layer-1: #fff;
+  --dsw-alias-bg-layer-2: #fff;
+  --dsw-alias-bg-module-platform: #f5f6f7;
+  --dsw-alias-border-l1: #0000000d;
+  --dsw-alias-border-l2: #0000001a;
+  --dsw-alias-border-l3: #0000001f;
+  --dsw-alias-label-primary: #0f1115;
+  --dsw-alias-label-secondary: #61666b;
+  --dsw-alias-label-tertiary: #81858c;
+  --dsw-alias-label-dimmed: #e1e5ee;
+  --dsw-alias-interactive-bg-hover: #2631480f;
+  --dsw-alias-interactive-bg-hover-danger: #ec13130d;
+  --dsw-alias-state-business-primary: #4176e6;
+  --dsw-alias-state-warn-primary: #f59e0b;
+  --dsw-alias-state-success-primary: #22c55e;
+  --dsw-alias-state-error-primary: #ec1313;
+  --dsw-radius-sm: 8px;
+  --dsw-radius-md: 12px;
+  --dsw-shadow-lv2: 0 4px 12px 0 #00000005, 0 2px 8px 0 #0000000a;
+  --dsw-specific-sidebar-fill: #f9fafb;
+  --dsw-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;}
+body[data-ds-dark-theme]{  --dsw-alias-bg-base: #151517;
+  --dsw-alias-bg-layer-1: #232324;
+  --dsw-alias-bg-layer-2: #2c2c2e;
+  --dsw-alias-bg-module-platform: #353638;
+  --dsw-alias-border-l1: #ffffff1a;
+  --dsw-alias-border-l2: #ffffff1f;
+  --dsw-alias-border-l3: #ffffff26;
+  --dsw-alias-label-primary: #f9fafb;
+  --dsw-alias-label-secondary: #cfd3d6;
+  --dsw-alias-label-tertiary: #adb2b8;
+  --dsw-alias-label-dimmed: #43454a;
+  --dsw-alias-interactive-bg-hover: #ffffff14;
+  --dsw-alias-interactive-bg-hover-danger: #f25a5a26;
+  --dsw-alias-state-business-primary: #7aaaff;
+  --dsw-alias-state-warn-primary: #f59e0b;
+  --dsw-alias-state-success-primary: #22c55e;
+  --dsw-alias-state-error-primary: #f25a5a;
+  --dsw-radius-sm: 8px;
+  --dsw-radius-md: 12px;
+  --dsw-shadow-lv2: 0 4px 12px 0 #00000033, 0 2px 8px 0 #00000026;
+  --dsw-specific-sidebar-fill: #1b1b1c;
+  --dsw-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;padding:18px;background:linear-gradient(135deg,#eef1f7,#e7ebf4);
+  font-family:var(--dsw-font-family);color:var(--dsw-alias-label-primary);-webkit-font-smoothing:antialiased}
+body[data-ds-dark-theme]{background:linear-gradient(135deg,#0d0f13,#15161c)}
+.mock-frame{position:relative;display:flex;height:calc(100vh - 36px);border-radius:18px;overflow:hidden;
+  background:var(--dsw-alias-bg-base);box-shadow:0 18px 50px rgba(30,50,90,.14)}
+/* 左侧栏 */
+.mock-sidebar{width:280px;flex:none;background:var(--dsw-specific-sidebar-fill);
+  border-right:.5px solid var(--dsw-alias-border-l3);padding:14px 12px;display:flex;flex-direction:column;gap:2px}
+.mock-brand{display:flex;align-items:center;gap:9px;padding:4px 8px 14px;font-size:14px;font-weight:600}
+.mock-logo{width:24px;height:24px;border-radius:8px;background:linear-gradient(135deg,#5aa7f2,#3b6fe6);
+  display:grid;place-items:center;color:#fff}
+.mock-brand small{font-size:10px;font-weight:600;letter-spacing:.08em;padding:2px 5px;border-radius:4px;
+  background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-base);opacity:.85}
+.mock-newbtn{height:34px;display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:10px;
+  font-size:13px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-base);
+  border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md)}
+.mock-nav{display:flex;flex-direction:column;gap:2px;padding:2px 0 10px}
+.mock-nav-row{height:32px;display:flex;align-items:center;gap:9px;padding:0 8px;border-radius:8px;
+  font-size:13px;color:var(--dsw-alias-label-secondary)}
+.mock-nav-row.active{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.mock-section{margin:6px 8px 6px;font-size:12px;color:var(--dsw-alias-label-tertiary)}
+.mock-ws{margin:10px 8px 4px;font-size:12px;color:var(--dsw-alias-label-tertiary);
+  display:flex;align-items:center;gap:6px}
+.mock-session{height:30px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:8px;
+  color:var(--dsw-alias-label-secondary);font-size:13px}
+.mock-session.active{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.mock-session svg{flex:none;opacity:.75}
+.mock-session-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 主区域 */
+.mock-main{position:relative;flex:1;min-width:0;display:flex;flex-direction:column;
+  padding-top:44px;background:var(--dsw-alias-bg-base)}
+.mock-conv-header{flex:none;padding:10px 28px 0 20px;display:flex;flex-direction:column;gap:10px;
+  border-bottom:.5px solid var(--dsw-alias-border-l3)}
+.mock-conv-title-row{display:flex;align-items:center;gap:14px;min-height:30px}
+.mock-conv-title{font-size:14px;font-weight:500;line-height:20px}
+.mock-chips{display:flex;align-items:center;gap:14px;color:var(--dsw-alias-label-tertiary);font-size:13px}
+.mock-chip{display:inline-flex;align-items:center;gap:5px}
+.mock-header-right{margin-left:auto;display:flex;align-items:center;gap:8px;color:var(--dsw-alias-label-secondary)}
+.mock-model{border:.5px solid var(--dsw-alias-border-l2);border-radius:8px;padding:3px 7px;display:flex;align-items:center;gap:6px;font-size:12px}
+.mock-model-dot{width:16px;height:16px;border-radius:5px;background:linear-gradient(135deg,#5aa7f2,#3b6fe6)}
+.mock-views{display:flex;gap:32px;font-size:13px;font-weight:500;color:var(--dsw-alias-label-tertiary)}
+.mock-view{padding:0 0 9px;position:relative}
+.mock-view.active{color:var(--dsw-alias-state-business-primary)}
+.mock-view.active:after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;border-radius:2px;
+  background:var(--dsw-alias-state-business-primary)}
+.mock-body{flex:1;min-height:0;display:flex;flex-direction:column;gap:18px;padding:26px 0 18px;overflow:hidden}
+.mock-thread{width:min(760px,calc(100% - 120px));margin:0 auto;display:flex;flex-direction:column;gap:18px;flex:1}
+.mock-bubble-user{align-self:flex-end;max-width:82%;background:#eaf1fe;color:#1f2a44;border-radius:14px;
+  padding:12px 16px;font-size:14px;line-height:22px}
+body[data-ds-dark-theme] .mock-bubble-user{background:#25314a;color:#dbe6ff}
+.mock-assistant{display:flex;flex-direction:column;gap:9px;font-size:14px;line-height:22px;
+  color:var(--dsw-alias-label-primary)}
+.mock-line{height:10px;border-radius:5px;background:var(--dsw-alias-interactive-bg-hover)}
+.mock-card{border:.5px solid var(--dsw-alias-border-l2);border-radius:12px;padding:12px 14px;
+  display:flex;flex-direction:column;gap:8px;background:var(--dsw-alias-bg-base)}
+.mock-card-title{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500}
+.mock-card-title span:first-child{width:22px;height:22px;border-radius:7px;background:#eaf3ff;color:#3b6fe6;
+  display:grid;place-items:center}
+.mock-card .mock-line{width:68%}
+.mock-composer{margin:auto auto 18px;width:min(760px,calc(100% - 120px));border:.5px solid var(--dsw-alias-border-l2);
+  border-radius:16px;padding:12px 14px;display:flex;flex-direction:column;gap:14px;color:var(--dsw-alias-label-tertiary);
+  font-size:13px;background:var(--dsw-alias-bg-base);box-shadow:var(--dsw-shadow-lv2)}
+.mock-composer-row{display:flex;align-items:center;gap:10px}
+.mock-composer-row .spacer{flex:1}
+.mock-send{width:30px;height:30px;border-radius:50%;background:var(--dsw-alias-state-business-primary);
+  color:#fff;display:grid;place-items:center}
+/* 右侧面板 */
+.mock-right{width:320px;flex:none;border-left:.5px solid var(--dsw-alias-border-l3);
+  background:var(--dsw-alias-bg-base);padding:12px 14px;display:flex;flex-direction:column;gap:14px}
+.mock-right-head{display:flex;align-items:center;gap:8px;color:var(--dsw-alias-label-secondary);font-size:13px}
+.mock-right-head .spacer{flex:1}
+.mock-right-card{border:.5px solid var(--dsw-alias-border-l2);border-radius:12px;padding:11px 12px;
+  display:flex;flex-direction:column;gap:7px}
+.mock-right-card .mock-line{width:56%}
+.mock-right-card .mock-line.short{width:34%}
+.mock-menu-slot{position:absolute;left:0;top:0;right:0;bottom:0;pointer-events:none}
+/* 插件样式 */
+
+/* 书脊条：比页面底色浅一号，底部一条细线 */
+.dsh-tab-pagebar{position:absolute;top:0;right:0;z-index:2;pointer-events:auto;box-sizing:border-box;
+  left:max(var(--dsh-tab-left, 0px), var(--dsh-frame-leading-clearance, 0px));
+  display:flex;align-items:center;height:44px;padding:0 16px 0 20px;
+  background:var(--dsw-alias-bg-module-platform);
+  box-shadow:inset 0 -.5px 0 var(--dsw-alias-border-l2);
+  -webkit-app-region:drag;
+  --dsh-tab-max-width:180px}
+html[data-windows-titlebar] .dsh-tab-pagebar{top:var(--dsh-windows-titlebar-height, 0px);
+  border-top-left-radius:var(--dsh-windows-content-radius, 16px);corner-shape:round}
+[data-rightbar-fullscreen] .dsh-tab-pagebar{display:none}
+.dsh-tab-pagebar__strip{display:flex;align-items:flex-end;flex:0 1 auto;min-width:0;
+  height:100%;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;scroll-padding-inline:8px}
+.dsh-tab-pagebar__strip::-webkit-scrollbar{display:none}
+/* 短标签：书脊上的一张纸签 */
+.dsh-tab-pagebar__tab{position:relative;box-sizing:border-box;display:flex;align-items:center;gap:7px;
+  flex:0 1 auto;min-width:72px;max-width:var(--dsh-tab-max-width);height:32px;padding:0 6px 0 12px;
+  border:.5px solid transparent;border-bottom:none;border-radius:8px 8px 0 0;
+  background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-size:13px;line-height:18px;
+  cursor:pointer;user-select:none;-webkit-user-select:none;-webkit-app-region:no-drag;touch-action:pan-y;
+  animation:dsh-tab-enter .16s ease;
+  transition:background-color .12s ease,color .12s ease,height .14s cubic-bezier(.2,.7,.2,1),
+    max-width .14s cubic-bezier(.2,.7,.2,1),border-color .12s ease,border-radius .14s ease,box-shadow .12s ease}
+.dsh-tab-pagebar__tab:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}
+/* 选中标签：抬到页面底色、不画底边线，和下面的会话页连成一张纸；
+   可用宽度是普通标签的 1.5 倍（180 → 270），标题短就按实际文字宽度收住、不留空白，
+   标题长才展开到 1.5 倍。切换时宽度和高度一起过渡
+   （只保留上方圆角，底部直角直接接页面，不再做额外的反圆角装饰） */
+.dsh-tab-pagebar__tab[aria-selected=true]{max-width:calc(var(--dsh-tab-max-width) * 1.5);height:38px;
+  background:var(--dsw-alias-bg-base);
+  border-color:var(--dsw-alias-border-l2);border-radius:10px 10px 0 0;color:var(--dsw-alias-label-primary)}
+.dsh-tab-pagebar__tab[aria-selected=true]:hover{background:var(--dsw-alias-bg-base);
+  color:var(--dsw-alias-label-primary)}
+/* 固定标签：只剩图标、宽度固定 40px；激活时也不展开 */
+.dsh-tab-pagebar__tab[data-pinned=true]{width:40px;min-width:40px;max-width:40px;flex:none;padding:0;
+  justify-content:center;gap:4px}
+.dsh-tab-pagebar__tab[data-pinned=true] .dsh-tab-pagebar__label,
+.dsh-tab-pagebar__tab[data-pinned=true] .dsh-tab-pagebar__close{display:none}
+.dsh-tab-pagebar__divider{flex:none;align-self:center;width:1px;height:20px;margin:0 6px;
+  background:var(--dsw-alias-border-l2)}
+.dsh-tab-pagebar__tab:focus-visible{outline:1.5px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}
+/* 拖拽排序：拖动中的标签变淡，落点画一条竖线 */
+.dsh-tab-pagebar__tab[data-dragging=true]{opacity:.55;cursor:grabbing}
+.dsh-tab-pagebar__tab[data-drop=before]{box-shadow:inset 2px 0 0 var(--dsw-alias-state-business-primary)}
+.dsh-tab-pagebar__tab[data-drop=after]{box-shadow:inset -2px 0 0 var(--dsw-alias-state-business-primary)}
+/* 左上角小角标：所属工作区（短名，悬停看全名） */
+.dsh-tab-pagebar__badge{position:absolute;left:5px;top:-5px;box-sizing:border-box;max-width:50%;height:10px;
+  padding:0 3px;border-radius:3px;color:#fff;font-size:8.5px;font-weight:600;line-height:10px;letter-spacing:.01em;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;opacity:.96}
+/* 激活标签更高，角标随之内收，避免顶到窗口最上沿（两种状态在屏幕上几乎同一高度） */
+.dsh-tab-pagebar__tab[aria-selected=true] .dsh-tab-pagebar__badge{top:1px}
+.dsh-tab-pagebar__tab[data-pinned=true] .dsh-tab-pagebar__badge{left:2px;max-width:38px;padding:0 1px;font-size:7.5px}
+.dsh-tab-pagebar__icon{position:relative;flex:none;width:16px;height:16px;display:grid;place-items:center;
+  color:var(--dsw-alias-label-tertiary)}
+.dsh-tab-pagebar__tab[aria-selected=true] .dsh-tab-pagebar__icon{color:var(--dsw-alias-label-secondary)}
+.dsh-tab-pagebar__label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-tab-pagebar__dot{flex:none;width:6px;height:6px;border-radius:50%}
+.dsh-tab-pagebar__dot[data-signal=running]{background:var(--dsw-alias-state-business-primary);
+  animation:dsh-tab-pulse 1.6s ease-in-out infinite}
+.dsh-tab-pagebar__dot[data-signal=pending]{background:var(--dsw-alias-state-warn-primary)}
+.dsh-tab-pagebar__dot[data-signal=unread]{background:var(--dsw-alias-state-success-primary)}
+.dsh-tab-pagebar__close{flex:none;width:18px;height:18px;display:grid;place-items:center;padding:0;
+  border:none;border-radius:5px;background:transparent;color:inherit;cursor:pointer;-webkit-app-region:no-drag;
+  opacity:0;pointer-events:none;transition:opacity .1s ease,background-color .1s ease}
+.dsh-tab-pagebar__tab:hover .dsh-tab-pagebar__close,
+.dsh-tab-pagebar__tab[aria-selected=true] .dsh-tab-pagebar__close,
+.dsh-tab-pagebar__tab:focus-within .dsh-tab-pagebar__close{opacity:1;pointer-events:auto}
+.dsh-tab-pagebar__close:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.dsh-tab-pagebar__close:focus-visible{outline:1.5px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
+.dsh-tab-pagebar__new{flex:none;align-self:center;width:30px;height:30px;display:grid;place-items:center;padding:0;
+  margin-left:6px;border:none;border-radius:var(--dsw-radius-sm);background:transparent;
+  color:var(--dsw-alias-label-secondary);cursor:pointer;-webkit-app-region:no-drag;
+  transition:background-color .12s ease,color .12s ease}
+.dsh-tab-pagebar__new:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.dsh-tab-pagebar__new:focus-visible{outline:1.5px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
+/* 右键菜单 */
+.dsh-tab-menu{position:fixed;z-index:100;box-sizing:border-box;min-width:188px;max-width:260px;padding:5px;
+  border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);
+  background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-shadow-lv2);
+  color:var(--dsw-alias-label-primary);font-size:13px;line-height:18px;
+  -webkit-app-region:no-drag;user-select:none;-webkit-user-select:none}
+.dsh-tab-menu__item{display:flex;align-items:center;width:100%;height:30px;padding:0 8px;border:none;border-radius:6px;
+  background:transparent;color:inherit;font:inherit;text-align:left;white-space:nowrap;cursor:pointer}
+.dsh-tab-menu__item:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-tab-menu__item:disabled{color:var(--dsw-alias-label-dimmed);cursor:default;background:transparent}
+.dsh-tab-menu__item[data-danger=true]:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover-danger);
+  color:var(--dsw-alias-state-error-primary)}
+.dsh-tab-menu__sep{height:.5px;margin:4px 6px;background:var(--dsw-alias-border-l2)}
+.dsh-tab-menu__hint{padding:4px 8px 6px;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:17px;
+  white-space:normal}
+@keyframes dsh-tab-pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes dsh-tab-enter{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.dsh-tab-pagebar__dot[data-signal=running]{animation:none}}
+@media (prefers-reduced-motion:reduce){
+  .dsh-tab-pagebar__tab,.dsh-tab-pagebar__new,.dsh-tab-pagebar__close{transition:none;animation:none}
+}
+
+/* 演示页微调 */
+.dsh-tab-pagebar{position:absolute;left:0;right:0;top:0;z-index:2}
+.dsh-tab-menu{position:absolute;left:112px;top:50px;z-index:5;display:none}
+html[data-demo-menu] .dsh-tab-menu{display:block}
+body[data-ds-dark-theme]{color-scheme:dark}
+</style>
+</head>
+<body>
+<div class="mock-frame">
+  <aside class="mock-sidebar">
+    <div class="mock-brand">
+      <span class="mock-logo"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.6 9.2 6.4 13 7.6 9.2 8.8 8 12.6 6.8 8.8 3 7.6 6.8 6.4 8 2.6Z"/></svg></span>
+      <span>Demo Harness</span>
+      <small>DEMO</small>
+    </div>
+    <div class="mock-newbtn"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg><span>新会话</span></div>
+    <div class="mock-nav">
+      <div class="mock-nav-row"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M2.4 4.2c0-.6.4-1 1-1h3l1.4 1.6h4.8c.6 0 1 .4 1 1v6c0 .6-.4 1-1 1H3.4c-.6 0-1-.4-1-1V4.2Z"/></svg><span>插件</span></div>
+      <div class="mock-nav-row"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="8" cy="8" r="5.6"/><path d="M8 4.8V8l2.2 1.6"/></svg><span>自动化任务</span></div>
+      <div class="mock-nav-row active"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.6 9.2 6.4 13 7.6 9.2 8.8 8 12.6 6.8 8.8 3 7.6 6.8 6.4 8 2.6Z"/></svg><span>项目</span></div>
+    </div>
+    <div class="mock-section">工作区</div>
+    <div class="mock-ws">demo</div><div class="mock-session"><span><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 8c0 2.6-2.3 4.7-5.2 4.7-.6 0-1.2-.1-1.8-.3L3.5 13.2l.7-2c-.9-.8-1.4-2-1.4-3.2C2.8 5.4 5.1 3.3 8 3.3s5.2 2.1 5.2 4.7Z"/></svg></span><span class="mock-session-title">设计评审待办整理</span></div><div class="mock-session"><span><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 8c0 2.6-2.3 4.7-5.2 4.7-.6 0-1.2-.1-1.8-.3L3.5 13.2l.7-2c-.9-.8-1.4-2-1.4-3.2C2.8 5.4 5.1 3.3 8 3.3s5.2 2.1 5.2 4.7Z"/></svg></span><span class="mock-session-title">接口联调问题清单</span></div><div class="mock-session"><span><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 8c0 2.6-2.3 4.7-5.2 4.7-.6 0-1.2-.1-1.8-.3L3.5 13.2l.7-2c-.9-.8-1.4-2-1.4-3.2C2.8 5.4 5.1 3.3 8 3.3s5.2 2.1 5.2 4.7Z"/></svg></span><span class="mock-session-title">标签页交互草稿</span></div><div class="mock-ws">文档</div><div class="mock-session"><span><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 8c0 2.6-2.3 4.7-5.2 4.7-.6 0-1.2-.1-1.8-.3L3.5 13.2l.7-2c-.9-.8-1.4-2-1.4-3.2C2.8 5.4 5.1 3.3 8 3.3s5.2 2.1 5.2 4.7Z"/></svg></span><span class="mock-session-title">每周周报草稿</span></div><div class="mock-session"><span><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 8c0 2.6-2.3 4.7-5.2 4.7-.6 0-1.2-.1-1.8-.3L3.5 13.2l.7-2c-.9-.8-1.4-2-1.4-3.2C2.8 5.4 5.1 3.3 8 3.3s5.2 2.1 5.2 4.7Z"/></svg></span><span class="mock-session-title">写作规范</span></div><div class="mock-ws">数据</div><div class="mock-session"><span><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 8c0 2.6-2.3 4.7-5.2 4.7-.6 0-1.2-.1-1.8-.3L3.5 13.2l.7-2c-.9-.8-1.4-2-1.4-3.2C2.8 5.4 5.1 3.3 8 3.3s5.2 2.1 5.2 4.7Z"/></svg></span><span class="mock-session-title">数据清洗脚本</span></div><div class="mock-ws">运维</div><div class="mock-session"><span><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 8c0 2.6-2.3 4.7-5.2 4.7-.6 0-1.2-.1-1.8-.3L3.5 13.2l.7-2c-.9-.8-1.4-2-1.4-3.2C2.8 5.4 5.1 3.3 8 3.3s5.2 2.1 5.2 4.7Z"/></svg></span><span class="mock-session-title">发布检查清单</span></div>
+  </aside>
+  <main class="mock-main">
+    <div class="dsh-tab-pagebar" role="presentation">
+      <div class="dsh-tab-pagebar__strip" role="tablist" aria-label="会话标签页">
+        <div class="dsh-tab-pagebar__tab" role="tab" tabindex="-1" aria-selected="false" data-pinned="true" title="新会话 · demo"><span class="dsh-tab-pagebar__badge" style="background-color:hsl(295 46% 38%)" title="工作区：demo">demo</span><span class="dsh-tab-pagebar__icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.4"/><path d="M9.9 6.1 8.7 8.7 6.1 9.9l1.2-2.6 2.6-1.2Z"/></svg></span><span class="dsh-tab-pagebar__label">新会话</span><span class="dsh-tab-pagebar__dot" data-signal="running" role="img" aria-label="运行中" title="运行中"></span></div><div class="dsh-tab-pagebar__tab" role="tab" tabindex="-1" aria-selected="false" data-pinned="true" title="写作规范 · 文档"><span class="dsh-tab-pagebar__badge" style="background-color:hsl(151 46% 38%)" title="工作区：文档">文档</span><span class="dsh-tab-pagebar__icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 8c0 2.6-2.3 4.7-5.2 4.7-.6 0-1.2-.1-1.8-.3L3.5 13.2l.7-2c-.9-.8-1.4-2-1.4-3.2C2.8 5.4 5.1 3.3 8 3.3s5.2 2.1 5.2 4.7Z"/></svg></span><span class="dsh-tab-pagebar__label">写作规范</span></div><span class="dsh-tab-pagebar__divider" aria-hidden="true"></span><div class="dsh-tab-pagebar__tab" role="tab" tabindex="0" aria-selected="true" data-pinned="false" title="设计评审待办整理 · demo"><span class="dsh-tab-pagebar__badge" style="background-color:hsl(295 46% 38%)" title="工作区：demo">demo</span><span class="dsh-tab-pagebar__icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 8c0 2.6-2.3 4.7-5.2 4.7-.6 0-1.2-.1-1.8-.3L3.5 13.2l.7-2c-.9-.8-1.4-2-1.4-3.2C2.8 5.4 5.1 3.3 8 3.3s5.2 2.1 5.2 4.7Z"/></svg></span><span class="dsh-tab-pagebar__label">设计评审待办整理</span><span class="dsh-tab-pagebar__dot" data-signal="running" role="img" aria-label="运行中" title="运行中"></span><button type="button" class="dsh-tab-pagebar__close" title="关闭标签页" aria-label="关闭标签页"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"/></svg></button></div><div class="dsh-tab-pagebar__tab" role="tab" tabindex="-1" aria-selected="false" data-pinned="false" title="每周周报草稿 · 文档"><span class="dsh-tab-pagebar__badge" style="background-color:hsl(151 46% 38%)" title="工作区：文档">文档</span><span class="dsh-tab-pagebar__icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 8c0 2.6-2.3 4.7-5.2 4.7-.6 0-1.2-.1-1.8-.3L3.5 13.2l.7-2c-.9-.8-1.4-2-1.4-3.2C2.8 5.4 5.1 3.3 8 3.3s5.2 2.1 5.2 4.7Z"/></svg></span><span class="dsh-tab-pagebar__label">每周周报草稿</span><button type="button" class="dsh-tab-pagebar__close" title="关闭标签页" aria-label="关闭标签页"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"/></svg></button></div><div class="dsh-tab-pagebar__tab" role="tab" tabindex="-1" aria-selected="false" data-pinned="false" title="数据清洗脚本 · 数据"><span class="dsh-tab-pagebar__badge" style="background-color:hsl(338 46% 38%)" title="工作区：数据">数据</span><span class="dsh-tab-pagebar__icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 8c0 2.6-2.3 4.7-5.2 4.7-.6 0-1.2-.1-1.8-.3L3.5 13.2l.7-2c-.9-.8-1.4-2-1.4-3.2C2.8 5.4 5.1 3.3 8 3.3s5.2 2.1 5.2 4.7Z"/></svg></span><span class="dsh-tab-pagebar__label">数据清洗脚本</span><button type="button" class="dsh-tab-pagebar__close" title="关闭标签页" aria-label="关闭标签页"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"/></svg></button></div>
+      </div>
+      <button type="button" class="dsh-tab-pagebar__new" title="新建会话" aria-label="新建会话"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg></button>
+    </div>
+    <div class="mock-conv-header">
+      <div class="mock-conv-title-row">
+        <div class="mock-conv-title">设计评审待办整理</div>
+        <div class="mock-chips">
+          <span class="mock-chip"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="6" cy="5.4" r="2.3"/><path d="M2.4 13.2c.3-2.2 1.8-3.5 3.6-3.5s3.3 1.3 3.6 3.5"/><circle cx="11.3" cy="5.8" r="1.8"/><path d="M10.4 9.9c1.5.2 2.6 1.4 2.9 3.1"/></svg>智能体团队</span>
+          <span class="mock-chip"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 2.4 13 4v3.6c0 3-2 5-5 6-3-1-5-3-5-6V4l5-1.6Z"/></svg>标准模式</span>
+        </div>
+        <div class="mock-header-right">
+          <span class="mock-model"><span class="mock-model-dot"></span>demo-model</span>
+          <span>···</span>
+          <span><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2.2" y="3.2" width="11.6" height="9.6" rx="2"/><path d="M9.4 3.4v9.2"/></svg></span>
+        </div>
+      </div>
+      <div class="mock-views">
+        <span class="mock-view active">对话</span>
+        <span class="mock-view">轨迹</span>
+        <span class="mock-view">···</span>
+      </div>
+    </div>
+    <div class="mock-body">
+      <div class="mock-thread">
+        <div class="mock-bubble-user">把上周设计评审的结论整理成一份待办清单，按模块分组，标注负责人。</div>
+        <div class="mock-assistant">
+          <div>好的，我先按模块拆成三类，下面是要点：</div>
+          <div class="mock-line" style="width:92%"></div>
+          <div class="mock-line" style="width:76%"></div>
+          <div class="mock-card">
+            <div class="mock-card-title"><span><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 8.2 6.8 11 12 4.8"/></svg></span><span>已整理 3 个模块 · 12 条待办</span></div>
+            <div class="mock-line"></div>
+            <div class="mock-line short" style="width:42%"></div>
+          </div>
+        </div>
+        <div class="mock-composer">
+          <div>发消息或创建任务，/ 调用指令，@ 文件或对话</div>
+          <div class="mock-composer-row">
+            <span><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg></span>
+            <span class="mock-chip"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 2.4 13 4v3.6c0 3-2 5-5 6-3-1-5-3-5-6V4l5-1.6Z"/></svg>工作区内修改</span>
+            <span class="spacer"></span>
+            <span class="mock-chip"><span style="width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-success-primary)"></span>demo-model</span>
+            <span class="mock-send"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12.6V3.6M4.4 7 8 3.4 11.6 7"/></svg></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="mock-menu-slot"><div class="dsh-tab-menu"><button type="button" class="dsh-tab-menu__item">关闭标签页</button><button type="button" class="dsh-tab-menu__item">关闭右侧标签页</button><button type="button" class="dsh-tab-menu__item">关闭其他标签页</button><div class="dsh-tab-menu__sep" role="separator"></div><button type="button" class="dsh-tab-menu__item">关闭全部标签页</button><div class="dsh-tab-menu__sep" role="separator"></div><button type="button" class="dsh-tab-menu__item">固定标签页</button><div class="dsh-tab-menu__sep" role="separator"></div><button type="button" class="dsh-tab-menu__item">归档会话</button></div></div>
+  </main>
+  <aside class="mock-right">
+    <div class="mock-right-head"><span><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.6 9.2 6.4 13 7.6 9.2 8.8 8 12.6 6.8 8.8 3 7.6 6.8 6.4 8 2.6Z"/></svg></span><span>开始</span><span class="spacer"></span><span><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2.2" y="3.2" width="11.6" height="9.6" rx="2"/><path d="M9.4 3.4v9.2"/></svg></span></div>
+    <div class="mock-right-card"><div class="mock-card-title"><span><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M2.4 4.2c0-.6.4-1 1-1h3l1.4 1.6h4.8c.6 0 1 .4 1 1v6c0 .6-.4 1-1 1H3.4c-.6 0-1-.4-1-1V4.2Z"/></svg></span><span>工作区文件</span></div><div class="mock-line"></div><div class="mock-line short"></div></div>
+    <div class="mock-right-card"><div class="mock-card-title"><span><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="8" cy="8" r="5.6"/><path d="M8 4.8V8l2.2 1.6"/></svg></span><span>会话记录</span></div><div class="mock-line"></div><div class="mock-line short"></div></div>
+    <div class="mock-right-card"><div class="mock-card-title"><span><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.6 9.2 6.4 13 7.6 9.2 8.8 8 12.6 6.8 8.8 3 7.6 6.8 6.4 8 2.6Z"/></svg></span><span>更多工具</span></div><div class="mock-line"></div></div>
+  </aside>
+</div>
+<script>
+  const params = new URLSearchParams(location.search)
+  if (params.get('theme') === 'dark') document.body.setAttribute('data-ds-dark-theme', '')
+  if (params.get('menu') === '1') document.documentElement.setAttribute('data-demo-menu', '1')
+</script>
+</body>
+</html>

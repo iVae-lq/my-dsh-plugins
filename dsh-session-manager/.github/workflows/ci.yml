@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ["22.15.0", "24"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # Import the module as well as parsing it: missing built-in exports
+      # (for example zstd on unsupported Node versions) must fail CI.
+      - run: npm run check
+      - run: npm test
+      - name: assert package contents
+        run: npm run check:package

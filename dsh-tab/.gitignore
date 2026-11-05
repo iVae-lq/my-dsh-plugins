@@ -1,0 +1,11 @@
+# 依赖与临时产物
+node_modules/
+*.log
+
+# macOS
+.DS_Store
+
+# 本地真实数据截图（仓库里只提交 docs/images 下的模拟数据截图）
+screenshots/
+ref/
+tools/
