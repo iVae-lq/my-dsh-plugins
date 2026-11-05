@@ -153,12 +153,16 @@ html[data-windows-titlebar] div:has(> [data-shell-bottom])[data-rightbar-fullscr
   background:var(--dsw-alias-bg-module-platform);
   box-shadow:inset 0 -.5px 0 var(--dsw-alias-border-l2);
   -webkit-app-region:drag;
+  /* 每个标签的最小宽度 = 未激活标签的常规宽度；再多就不再压缩，溢出的交给「…」 */
+  --dsh-tab-min-width:108px;
   --dsh-tab-max-width:180px}
-/* Windows：标签栏放进标题栏。左缘 = 左侧栏右缘 + 一段空白（留给拖动窗口）；
+/* Windows：标签栏放进标题栏。左缘是固定值，不再跟随侧栏宽度：
+   标题栏左侧控件（侧栏开关 + 应用 / 编辑菜单约 140px）+ 预留 3 个按钮（3 × 40px）≈ 260px，
+   侧栏收起后左边冒出的按钮也不会和标签重叠；想调整改 --dsh-tab-titlebar-left 即可。
    右缘避开窗口按钮（titlebar-area 环境变量，没有时按 138px 兜底）再留一点空隙 */
 html[data-windows-titlebar] .dsh-tab-pagebar{top:0;
   height:var(--dsh-windows-titlebar-height, 40px);
-  left:calc(max(var(--dsh-tab-left, 0px), var(--dsh-frame-leading-clearance, 0px)) + 24px);
+  left:var(--dsh-tab-titlebar-left, 260px);
   right:calc(max(138px, 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)) + 8px);
   padding:0;background:transparent;box-shadow:none;border-radius:0}
 html[data-windows-titlebar] .dsh-tab-pagebar__tab{height:calc(var(--dsh-windows-titlebar-height, 40px) - 8px)}
@@ -178,7 +182,7 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
 .dsh-tab-pagebar__strip::-webkit-scrollbar{display:none}
 /* 短标签：书脊上的一张纸签 */
 .dsh-tab-pagebar__tab{position:relative;box-sizing:border-box;display:flex;align-items:center;gap:7px;
-  flex:0 1 auto;min-width:72px;max-width:var(--dsh-tab-max-width);height:32px;padding:0 6px 0 12px;
+  flex:0 1 auto;min-width:var(--dsh-tab-min-width);max-width:var(--dsh-tab-max-width);height:32px;padding:0 6px 0 12px;
   border:.5px solid transparent;border-bottom:none;border-radius:8px 8px 0 0;
   background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-size:13px;line-height:18px;
   cursor:pointer;user-select:none;-webkit-user-select:none;-webkit-app-region:no-drag;touch-action:pan-y;
