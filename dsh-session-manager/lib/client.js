@@ -8319,9 +8319,11 @@ function isTopmostDialog(z) {
       }, "session-manager: custom select popups");
 
       // Keyboard shortcut that toggles the session manager home page.
-      // Default: Ctrl+S (Cmd+S on macOS) in the desktop app; the browser keeps
-      // Ctrl+Alt+S because DSH's Web profiles only admit Mod+Alt / Mod+Shift style
-      // combinations (a bare Mod+S default would be rejected at registration).
+      // Default: Ctrl+; (Cmd+; on macOS) in the desktop app. Unlike Ctrl+S / Ctrl+M
+      // it is not taken by DSH's commands, the editor (save, tab-focus toggle),
+      // the terminal (no control character) or macOS (Cmd+M minimizes). The
+      // browser uses Ctrl+Alt+; because DSH's Web profiles only admit Mod+Alt /
+      // Mod+Shift style combinations (a bare Mod+; default would be rejected).
       // Rebindable under DSH Settings -> Shortcuts. The shortcut service is adopted
       // dynamically (not through the static `inject` list) so a host without it
       // only loses the hotkey.
@@ -8336,11 +8338,11 @@ function isTopmostDialog(z) {
           },
           aliases: ["session manager", "sessions", "open sessions"],
           defaults: {
-            "desktop:macos": { code: "KeyS", modifiers: ["primary"] },
-            "desktop:windows": { code: "KeyS", modifiers: ["primary"] },
-            "desktop:linux": { code: "KeyS", modifiers: ["primary"] },
-            "web:macos": { code: "KeyS", modifiers: ["primary", "alt"] },
-            "web:windows": { code: "KeyS", modifiers: ["primary", "alt"] }
+            "desktop:macos": { code: "Semicolon", modifiers: ["primary"] },
+            "desktop:windows": { code: "Semicolon", modifiers: ["primary"] },
+            "desktop:linux": { code: "Semicolon", modifiers: ["primary"] },
+            "web:macos": { code: "Semicolon", modifiers: ["primary", "alt"] },
+            "web:windows": { code: "Semicolon", modifiers: ["primary", "alt"] }
           },
           regions: ["page", "editable"],
           modals: [],

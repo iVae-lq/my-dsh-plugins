@@ -73,7 +73,7 @@ DSH's read-only agent-preset label beside the title (e.g. "Standard mode" / "Cre
 
 ### 2.2 Sessions and workspaces management entry and interface
 
-Open **Sessions & Workspaces** from the bottom of DSH's sidebar, or with the shortcut (`Ctrl+S` / `⌘S` in the desktop app, `Ctrl+Alt+S` in the browser; rebindable in DSH's Shortcuts settings), to browse all sessions and workspaces: the session management tab supports switching workspaces, searching by title / ID / notes / tags, applying filters and sorting, and running **Open / Archive / Unarchive / Tags / Notes / Move / Migrate preset / Delete** on any session row; the workspace management tab supports searching, sorting, bulk actions, and visibility toggling.
+Open **Sessions & Workspaces** from the bottom of DSH's sidebar, or with the shortcut (`Ctrl+;` / `⌘;` in the desktop app, `Ctrl+Alt+;` in the browser; rebindable in DSH's Shortcuts settings), to browse all sessions and workspaces: the session management tab supports switching workspaces, searching by title / ID / notes / tags, applying filters and sorting, and running **Open / Archive / Unarchive / Tags / Notes / Move / Migrate preset / Delete** on any session row; the workspace management tab supports searching, sorting, bulk actions, and visibility toggling.
 
 ### 2.3 Bulk management
 

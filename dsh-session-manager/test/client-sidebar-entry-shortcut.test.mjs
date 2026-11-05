@@ -33,7 +33,7 @@ const shortcutText = app => {
   return span ? text(span) : "";
 };
 
-test("shortcut defaults: Ctrl+S / Cmd+S in the desktop app, Ctrl+Alt+S kept for the browser", () => {
+test("shortcut defaults: Ctrl+; / Cmd+; in the desktop app, Ctrl+Alt+; in the browser", () => {
   const shortcuts = shortcutStub([toggleRow()]);
   const app = mountClient({ shortcuts });
   assert.equal(shortcuts.registered.length, 1);
@@ -42,12 +42,39 @@ test("shortcut defaults: Ctrl+S / Cmd+S in the desktop app, Ctrl+Alt+S kept for 
   // The bundle runs in its own vm realm: compare plain JSON, not prototypes.
   const defaults = JSON.parse(JSON.stringify(command.defaults));
   for (const profile of ["desktop:windows", "desktop:macos", "desktop:linux"]) {
-    assert.deepEqual(defaults[profile], { code: "KeyS", modifiers: ["primary"] }, profile);
+    assert.deepEqual(defaults[profile], { code: "Semicolon", modifiers: ["primary"] }, profile);
   }
-  // DSH's Web profiles reject a bare Mod+S default, so the browser keeps Mod+Alt+S.
+  // DSH's Web profiles reject a bare Mod+; default, so the browser adds Alt.
   for (const profile of ["web:windows", "web:macos"]) {
-    assert.deepEqual(defaults[profile], { code: "KeyS", modifiers: ["primary", "alt"] }, profile);
+    assert.deepEqual(defaults[profile], { code: "Semicolon", modifiers: ["primary", "alt"] }, profile);
   }
+  app.dispose();
+});
+
+test("shortcut defaults avoid every DSH default and the editor/terminal keys that were taken", () => {
+  const shortcuts = shortcutStub([toggleRow()]);
+  const app = mountClient({ shortcuts });
+  const defaults = JSON.parse(JSON.stringify(shortcuts.registered[0].defaults));
+  // Desktop Windows defaults shipped by DSH 0.2.1 (ui-layout, ui-workspace,
+  // sidebar files/browser/terminal, settings, shortcuts, open-in-app).
+  const taken = new Set(["primary+KeyB", "primary+alt+KeyB", "primary+KeyN", "primary+KeyK", "primary+KeyO", "primary+alt+KeyO",
+    "primary+KeyP", "primary+KeyT", "primary+Comma", "primary+Slash", "control+Backquote", "primary+alt+KeyG",
+    "primary+alt+KeyF", "primary+shift+KeyA",
+    // Editor (CodeMirror) and terminal keys the earlier defaults would have swallowed.
+    "primary+KeyS", "primary+KeyM", "primary+KeyE"]);
+  const key = binding => [...binding.modifiers, binding.code].join("+");
+  assert.ok(!taken.has(key(defaults["desktop:windows"])), "desktop default must stay clear of taken keys");
+  app.dispose();
+});
+
+test("a Ctrl+; binding renders as Ctrl+; (Windows) and ⌘; (macOS)", async () => {
+  const shortcuts = shortcutStub([toggleRow({ binding: { code: "Semicolon", modifiers: ["control"] }, keys: ["Ctrl", "+", ";"], aria: "Control+;" })]);
+  const app = mountClient({ shortcuts });
+  await app.flush();
+  assert.equal(shortcutText(app), "Ctrl+;");
+  shortcuts.publish([toggleRow({ binding: { code: "Semicolon", modifiers: ["meta"] }, keys: ["⌘", ";"], aria: "Meta+;" })]);
+  await app.flush();
+  assert.equal(shortcutText(app), "⌘;");
   app.dispose();
 });
 
