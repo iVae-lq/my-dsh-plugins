@@ -1015,21 +1015,9 @@ function isTopmostDialog(z) {
       // Scoped to .sm-ocPanel so the annotation surface (also .sm-panelDialog) is untouched.
       // Every fill inside the page is a translucent neutral (--sm-oc-fill*) rather than an
       // opaque theme layer, so controls blend with any dialog opacity / glass setting.
-      // The full-window session manager page is excluded here: its blur lives on
-      // the content-free .sm-ocGlass layer instead (see below).
-      "html[data-sm-translucent] .sm-presetMenu,html[data-sm-translucent] .sm-nativeDialog:not(.sm-ocPanel),html[data-sm-translucent] .sm-panelDialog:not(.sm-ocPanel),html[data-sm-translucent] .sm-migrateDialog,html[data-sm-translucent] .sm-settingsCard:not(.sm-ocPanel *),html[data-sm-translucent] .sm-ocGlass{-webkit-backdrop-filter:blur(var(--sm-glass-blur,12px)) saturate(1.15);backdrop-filter:blur(var(--sm-glass-blur,12px)) saturate(1.15)}",
+      "html[data-sm-translucent] .sm-presetMenu,html[data-sm-translucent] .sm-nativeDialog,html[data-sm-translucent] .sm-panelDialog,html[data-sm-translucent] .sm-migrateDialog,html[data-sm-translucent] .sm-settingsCard{-webkit-backdrop-filter:blur(var(--sm-glass-blur,12px)) saturate(1.15);backdrop-filter:blur(var(--sm-glass-blur,12px)) saturate(1.15)}",
       ".sm-panelDialog.sm-ocPanel{--sm-dialog-surface:var(--dsw-alias-bg-base,var(--dsw-alias-bg-layer-1,#1f1f23));--sm-oc-fill:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 6%,transparent);--sm-oc-fill-hover:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 10%,transparent);--sm-oc-fill-active:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 15%,transparent);--sm-oc-line:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 14%,transparent);position:fixed!important;inset:var(--dsh-windows-titlebar-height,0px) 0 0 0!important;margin:0!important;width:auto!important;height:auto!important;max-width:none!important;max-height:none!important;border:0!important;border-radius:0!important;box-shadow:none!important}",
       "html[data-windows-titlebar] .sm-panelDialog.sm-ocPanel{border-radius:14px 14px 0 0!important}",
-      // Frosted glass of the full-window page, on an empty layer behind the
-      // content. Chromium can drop a backdrop-filter surface from a frame while
-      // that surface's own content repaints: the drop is invisible on the local
-      // monitor, but screen capture (UU / ToDesk / Sunlogin remote desktop,
-      // recorders) shows the whole page vanishing as the pointer moves over the
-      // list. Here the blurred surface never repaints, because hover, scrolling
-      // and list updates happen in sibling layers above it. It inherits the page's
-      // --sm-dialog-fill, so the opacity and blur settings look exactly as before.
-      ".sm-panelDialog.sm-ocPanel{background:transparent!important}",
-      ".sm-ocGlass{position:absolute;inset:0;z-index:-1;pointer-events:none;background:var(--sm-dialog-fill);border-radius:inherit}",
       ".sm-panelDialog.sm-ocPanel .sm-nativeDialogHeader{border-bottom:0!important;min-height:44px!important;padding:6px 14px!important;background:transparent}",
       ".sm-ocPanel .sm-panelHeaderClose{border:0;background:transparent;color:var(--dsw-alias-label-secondary)}.sm-ocPanel .sm-panelHeaderClose:hover:not(:disabled),.sm-ocPanel .sm-panelHeaderGithub:hover,.sm-ocPanel .sm-panelHeaderWhale:hover{background:var(--sm-oc-fill-hover)}",
       ".sm-ocPanel .sm-panelNav{background:var(--sm-oc-fill);border:0;border-radius:9px;padding:2px}.sm-ocPanel .sm-panelNavTab{border-radius:7px;font-weight:500}.sm-ocPanel .sm-panelNavTab.sm-on{background:var(--sm-oc-fill-active);box-shadow:none;font-weight:500}",
@@ -1037,7 +1025,7 @@ function isTopmostDialog(z) {
       ".sm-ocWrap{box-sizing:border-box;width:100%;max-width:1060px;height:100%;min-height:0;margin:0 auto;padding:20px 32px 0;display:grid;grid-template-columns:232px minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr);column-gap:48px}",
       ".sm-ocNarrow{box-sizing:border-box;width:100%;max-width:880px;height:100%;min-height:0;margin:0 auto;padding:16px 32px 0;display:flex;flex-direction:column}",
       ".sm-ocNarrow .sm-list{flex:1 1 auto;min-height:0}",
-      ".sm-ocSettings{overflow:auto;padding-bottom:24px}.sm-ocPanel .sm-ocSettings .sm-settingsCard,html[data-sm-translucent] .sm-ocPanel .sm-ocSettings .sm-settingsCard{background:transparent;border:0;box-shadow:none;max-width:none;width:100%;padding:0}",
+      ".sm-ocSettings{overflow:auto;padding-bottom:24px}.sm-ocPanel .sm-ocSettings .sm-settingsCard,html[data-sm-translucent] .sm-ocPanel .sm-ocSettings .sm-settingsCard{background:transparent;border:0;box-shadow:none;-webkit-backdrop-filter:blur(0px);backdrop-filter:blur(0px);max-width:none;width:100%;padding:0}",
       ".sm-ocSearch{grid-column:2;grid-row:1;position:relative;display:flex;align-items:center;margin-bottom:24px}",
       ".sm-ocSearch svg{position:absolute;left:12px;color:var(--dsw-alias-label-tertiary);pointer-events:none}",
       ".sm-ocPanel .sm-ocSearch .sm-queryInput{height:36px;padding:0 12px 0 36px;border:0!important;border-radius:9px;background:var(--sm-oc-fill);font-size:13px}.sm-ocPanel .sm-ocSearch .sm-queryInput:hover{background:var(--sm-oc-fill-hover)}.sm-ocPanel .sm-ocSearch .sm-queryInput:focus-visible{outline:1.5px solid color-mix(in srgb,var(--dsw-alias-label-primary,#888) 35%,transparent)!important;outline-offset:0!important;background:var(--sm-oc-fill-hover)}",
@@ -6426,8 +6414,6 @@ function isTopmostDialog(z) {
           "aria-modal": "true",
           "aria-labelledby": "sm-panel-dialog-title"
         },
-          // Content-free glass layer: see .sm-ocGlass in the stylesheet.
-          h("div", { className: "sm-ocGlass", "aria-hidden": "true" }),
           h("div", { className: "sm-nativeDialogHeader" },
             h("div", { className: "sm-panelHeaderLeft" },
               renderTip(t("panel.github.title"), h("a", {
