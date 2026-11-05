@@ -56,7 +56,10 @@ test("dialog opacity: values are clamped to 0..100 and snapped to the 5% step", 
   const { updateStore } = harness.exports;
 
   updateStore.setDialogOpacity(10);
-  assert.equal(updateStore.getDialogOpacity(), 50, "below the minimum clamps up to 50");
+  assert.equal(updateStore.getDialogOpacity(), 10, "low values are allowed: there is no artificial floor above 0");
+
+  updateStore.setDialogOpacity(-20);
+  assert.equal(updateStore.getDialogOpacity(), 0, "below the minimum clamps up to 0");
 
   updateStore.setDialogOpacity(400);
   assert.equal(updateStore.getDialogOpacity(), 100, "above the maximum clamps down to 100");
