@@ -975,17 +975,9 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
         const openListMenu = (event) => {
           event.preventDefault()
           event.stopPropagation()
-          const strip = stripRef.current
-          if (strip === null) return
           const rect = event.currentTarget.getBoundingClientRect()
-          const viewLeft = strip.scrollLeft
-          const viewRight = viewLeft + strip.clientWidth
-          const hidden = tabs.filter((tab) => {
-            const element = strip.querySelector(`[data-session-id="${tab.id}"]`)
-            if (element === null) return false
-            return element.offsetLeft < viewLeft - 1 || element.offsetLeft + element.offsetWidth > viewRight + 1
-          })
-          const source = hidden.length === 0 ? tabs : hidden
+          // 始终列出全部标签（不论有没有被挤出去的）
+          const source = tabs
           setListMenu({
             x: rect.left,
             y: rect.bottom + 4,
