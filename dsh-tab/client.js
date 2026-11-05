@@ -153,8 +153,9 @@ html[data-windows-titlebar] div:has(> [data-shell-bottom])[data-rightbar-fullscr
   background:var(--dsw-alias-bg-module-platform);
   box-shadow:inset 0 -.5px 0 var(--dsw-alias-border-l2);
   -webkit-app-region:drag;
-  /* 每个标签的最小宽度 = 未激活标签的常规宽度；再多就不再压缩，溢出的交给「…」 */
-  --dsh-tab-min-width:108px;
+  /* 每个标签的最小宽度 = 未激活标签的最大宽度：未激活标签统一 180px，激活标签至少也是 180px；
+     再多就不再压缩，放不下的交给常驻的「…」 */
+  --dsh-tab-min-width:180px;
   --dsh-tab-max-width:180px}
 /* Windows：标签栏放进标题栏。左缘是固定值，不再跟随侧栏宽度：
    标题栏左侧控件（侧栏开关 + 应用 / 编辑菜单约 140px）+ 预留 3 个按钮（3 × 40px）≈ 260px，
@@ -1198,21 +1199,19 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
                 }),
               ),
             ),
-            overflowed
-              ? h(
-                  'button',
-                  {
-                    key: 'more',
-                    type: 'button',
-                    className: 'dsh-tab-pagebar__more',
-                    title: t('tab.more'),
-                    'aria-label': t('tab.more'),
-                    'aria-haspopup': 'menu',
-                    onClick: openListMenu,
-                  },
-                  h(IconMore),
-                )
-              : null,
+            h(
+              'button',
+              {
+                key: 'more',
+                type: 'button',
+                className: 'dsh-tab-pagebar__more',
+                title: t('tab.more'),
+                'aria-label': t('tab.more'),
+                'aria-haspopup': 'menu',
+                onClick: openListMenu,
+              },
+              h(IconMore),
+            ),
             h(
               'button',
               {
