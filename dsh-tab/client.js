@@ -55,6 +55,9 @@ window.__ModuleLoader__.load({
       'settings.autoMaximize.hint': '每次启动桌面端时自动把窗口最大化（仅 Windows 桌面端）',
       'settings.autoHideSidebar': '自动隐藏侧边栏',
       'settings.autoHideSidebar.hint': '每次启动时自动收起左侧边栏，改用标签栏和会话管理切换会话',
+      'settings.transparentCaption': '窗口按钮背景透明',
+      'settings.transparentCaption.hint':
+        '右上角最小化 / 最大化 / 关闭按钮不再单独铺一块侧栏底色，直接透出标题栏，换肤或开壁纸时颜色保持一致（仅 Windows 桌面端）',
       'tab.newSession': '新会话',
       'tab.untitled': '未命名',
       'tab.close': '关闭标签页：{title}',
@@ -86,6 +89,9 @@ window.__ModuleLoader__.load({
       'settings.autoMaximize.hint': 'Maximize the window each time the desktop app starts (Windows desktop only)',
       'settings.autoHideSidebar': 'Auto-hide sidebar',
       'settings.autoHideSidebar.hint': 'Collapse the left sidebar each time the app starts; switch sessions from the tab bar and session manager',
+      'settings.transparentCaption': 'Transparent window buttons',
+      'settings.transparentCaption.hint':
+        'Let the minimize / maximize / close buttons show the title bar behind them instead of a separate sidebar-colored block, so skins and wallpapers stay consistent (Windows desktop only)',
       'tab.newSession': 'New session',
       'tab.untitled': 'Untitled',
       'tab.close': 'Close tab: {title}',
@@ -151,6 +157,20 @@ div:has(> [data-shell-bottom]):has(> [data-shell-overlay]) > [data-side] {
 html[data-windows-titlebar] div:has(> [data-shell-bottom]):has(> [data-shell-overlay]),
 html[data-windows-titlebar] div:has(> [data-shell-bottom])[data-rightbar-fullscreen]:has(> [data-shell-overlay]) {
   grid-template-rows: 0 minmax(0, 1fr) auto !important;
+}
+`
+
+    // ── Windows 原生窗口按钮底色（「窗口按钮背景透明」开关） ─────────────────────
+    // 右上角三个按钮是 Electron 的 titleBarOverlay，不是网页画的。DSH 桌面端在 body 下挂一个
+    // 隐藏的 span（行内样式 background-color: var(--dsw-specific-sidebar-fill)），量出它的颜色
+    // 交给 setTitleBarOverlay；head 里的样式一变它就重新量一次。换肤插件把侧栏底色调成半透明后，
+    // 按钮会单独铺一块和标题栏对不上的颜色（例如 dream-skin 开壁纸时偏白）。
+    // 这里只在那个探针上把变量改成透明：Electron 在底色不透明度 < 100% 时让按钮层和下面的网页
+    // 叠加，按钮就直接透出标题栏；悬停色用的是系统前景色，不受影响。页面其他地方的侧栏底色不变。
+    // 官方改了探针写法时本段失效，按钮回到官方颜色（不会出错）。
+    const CAPTION_CSS = `
+html[data-windows-titlebar] body > span[style*="--dsw-specific-sidebar-fill"] {
+  --dsw-specific-sidebar-fill: transparent !important;
 }
 `
 
@@ -1255,12 +1275,13 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
       }
     }
 
-    // ── 设置（两个开关，默认开启；浏览器本地 localStorage 持久化） ─────────────────
+    // ── 设置（几个开关，默认开启；浏览器本地 localStorage 持久化） ─────────────────
     const SETTINGS_KEY = 'dsh.tab.settings.v1'
-    const SETTINGS_DEFAULTS = Object.freeze({ autoMaximize: true, autoHideSidebar: true })
+    const SETTINGS_DEFAULTS = Object.freeze({ autoMaximize: true, autoHideSidebar: true, transparentCaption: true })
     const SETTINGS_ROWS = [
       { key: 'autoMaximize', title: 'settings.autoMaximize', hint: 'settings.autoMaximize.hint' },
       { key: 'autoHideSidebar', title: 'settings.autoHideSidebar', hint: 'settings.autoHideSidebar.hint' },
+      { key: 'transparentCaption', title: 'settings.transparentCaption', hint: 'settings.transparentCaption.hint' },
     ]
     const SETTINGS_CSS = `
 .dsh-tab-settings{display:flex;flex-direction:column}
@@ -1284,11 +1305,11 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
         if (raw !== null) {
           const value = JSON.parse(raw)
           if (value !== null && typeof value === 'object') {
-            return {
-              autoMaximize: typeof value.autoMaximize === 'boolean' ? value.autoMaximize : SETTINGS_DEFAULTS.autoMaximize,
-              autoHideSidebar:
-                typeof value.autoHideSidebar === 'boolean' ? value.autoHideSidebar : SETTINGS_DEFAULTS.autoHideSidebar,
+            const result = {}
+            for (const key of Object.keys(SETTINGS_DEFAULTS)) {
+              result[key] = typeof value[key] === 'boolean' ? value[key] : SETTINGS_DEFAULTS[key]
             }
+            return result
           }
         }
       } catch (error) {
@@ -1607,6 +1628,32 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
             ),
           )
         })
+
+        // 窗口按钮背景透明：开关打开时往 head 放一段样式，关掉 / 卸载时移除。
+        // DSH 桌面端监听 head 的变化，增删这个 <style> 就会让它重新量色并更新按钮。
+        ctx.effect(() => {
+          let style = null
+          const sync = () => {
+            const on = settings.getSnapshot().transparentCaption === true
+            if (on && style === null) {
+              style = document.createElement('style')
+              style.dataset.plugin = 'dsh-tab'
+              style.dataset.pluginCss = 'dsh-tab/caption.css'
+              style.textContent = CAPTION_CSS
+              document.head.appendChild(style)
+            } else if (!on && style !== null) {
+              style.remove()
+              style = null
+            }
+          }
+          sync()
+          const unsubscribe = settings.subscribe(sync)
+          return () => {
+            unsubscribe()
+            if (style !== null) style.remove()
+            style = null
+          }
+        }, 'dsh-tab: transparent caption buttons')
 
         // 启动动作：自动最大化（交给宿主半，只在 Windows 桌面端）+ 自动隐藏侧边栏
         ctx.effect(() => {
