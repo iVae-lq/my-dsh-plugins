@@ -302,6 +302,14 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
         h('circle', { key: 'c', cx: 12.5, cy: 8, r: 0.9, fill: 'currentColor' }),
       ])
     }
+    function IconPanel() {
+      return svg([
+        h('rect', { key: 'a', x: 2.8, y: 2.8, width: 4.4, height: 4.4, rx: 1 }),
+        h('rect', { key: 'b', x: 8.8, y: 2.8, width: 4.4, height: 4.4, rx: 1 }),
+        h('rect', { key: 'c', x: 2.8, y: 8.8, width: 4.4, height: 4.4, rx: 1 }),
+        h('rect', { key: 'd', x: 8.8, y: 8.8, width: 4.4, height: 4.4, rx: 1 }),
+      ])
+    }
     function IconClose() {
       return h(
         'svg',
@@ -493,7 +501,7 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
 
     // ── 单个标签页 ──────────────────────────────────────────────────────────
     function TabItem(props) {
-      const { id, title, active, signal, blank, pinned, badge, drop, dragging, t, onSelect, onClose, onMenu, onArrow, onDragStart } = props
+      const { id, title, active, signal, blank, panel, pinned, badge, drop, dragging, t, onSelect, onClose, onMenu, onArrow, onDragStart } = props
       const statusLabel =
         signal === 'running' ? t('tab.running') : signal === 'pending' ? t('tab.pending') : signal === 'unread' ? t('tab.unread') : undefined
       return h(
@@ -510,7 +518,7 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
           title: pinned ? `${title} · ${t('tab.pinned')}` : title,
           onClick: () => onSelect(id),
           onPointerDown: (event) => {
-            if (event.button !== 0) return
+            if (event.button !== 0 || panel === true) return
             const target = event.target
             if (target !== null && typeof target.closest === 'function' && target.closest('.dsh-tab-pagebar__close') !== null) return
             onDragStart(event)
@@ -552,7 +560,7 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
               },
               badge.label,
             ),
-        h('span', { className: 'dsh-tab-pagebar__icon' }, blank ? h(IconCompass) : h(IconConversation)),
+        h('span', { className: 'dsh-tab-pagebar__icon' }, panel === true ? h(IconPanel) : blank ? h(IconCompass) : h(IconConversation)),
         h('span', { className: 'dsh-tab-pagebar__label' }, title),
         signal !== undefined
           ? h('span', {
@@ -676,7 +684,19 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
 
         const rows = catalog?.byId ?? {}
         const archived = useMemo(() => new Set(workspaces?.archivedSessionIds ?? []), [workspaces])
-        const activeId = currentSessionIdOf(catalog)
+        const activeSessionId = currentSessionIdOf(catalog)
+
+        // 非会话界面（插件、自动任务等全局面板）：打开时在标签栏里起一个面板标签，
+        // 关掉它回到原会话。面板标签只活在本次运行里，不进持久化。
+        const activePanelId = useSyncExternalStore(actions.panel.subscribe, actions.panel.getActive)
+        const [panelIds, setPanelIds] = useState([])
+        useEffect(() => {
+          if (activePanelId === null) return
+          setPanelIds((current) => (current.includes(activePanelId) ? current : [...current, activePanelId]))
+        }, [activePanelId])
+        // 会话标签的「当前」：面板盖在会话上时，会话标签不算选中（否则点它没有任何反应）
+        const activeId = activePanelId === null ? activeSessionId : undefined
+        const panelKey = (id) => `panel:${id}`
 
         // 会话 → 所属工作区（角标用）。工作区标题为空时用目录名，再退到 workspaceId。
         const workspaceBadges = useMemo(() => {
@@ -710,12 +730,12 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
 
         // 当前会话自动入签（官方侧栏点开会话、启动恢复、新建会话都走这里）
         useEffect(() => {
-          actions.store.pruneSuppressed(activeId)
-          if (activeId === undefined) return
-          if (actions.store.isSuppressed(activeId)) return
-          if (rows[activeId] === undefined) return
-          if (!actions.store.has(activeId)) actions.store.add(activeId)
-        }, [activeId, catalog])
+          actions.store.pruneSuppressed(activeSessionId)
+          if (activeSessionId === undefined) return
+          if (actions.store.isSuppressed(activeSessionId)) return
+          if (rows[activeSessionId] === undefined) return
+          if (!actions.store.has(activeSessionId)) actions.store.add(activeSessionId)
+        }, [activeSessionId, catalog])
 
         // 会话被删除 / 归档后摘签
         useEffect(() => {
@@ -726,7 +746,8 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
 
         const tabs = displayTabs(snapshot).filter((tab) => rows[tab.id] !== undefined && !archived.has(tab.id))
         const pinnedCount = tabs.filter((tab) => tab.pinned).length
-        const visualActiveId = pendingSelect === null ? activeId : pendingSelect.id
+        const visualActiveId =
+          pendingSelect !== null ? pendingSelect.id : activePanelId !== null ? panelKey(activePanelId) : activeId
         const stripRef = useRef(null)
         const barRef = useRef(null)
 
@@ -943,7 +964,7 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
           observer.observe(strip)
           for (const child of strip.children) observer.observe(child)
           return () => observer.disconnect()
-        }, [tabs, visualActiveId])
+        }, [tabs, panelIds, visualActiveId])
 
         const dismissListMenu = useCallback(() => setListMenu(null), [])
         const openListMenu = (event) => {
@@ -1148,6 +1169,30 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
                   ? [node, h('span', { key: 'divider', className: 'dsh-tab-pagebar__divider', 'aria-hidden': true })]
                   : [node]
               }),
+              panelIds.map((panelId) =>
+                h(TabItem, {
+                  key: panelKey(panelId),
+                  id: panelKey(panelId),
+                  active: panelKey(panelId) === visualActiveId,
+                  panel: true,
+                  blank: false,
+                  pinned: false,
+                  badge: null,
+                  drop: null,
+                  dragging: false,
+                  title: actions.panel.label(panelId),
+                  signal: undefined,
+                  t,
+                  onSelect: () => actions.panel.select(panelId),
+                  onClose: () => {
+                    setPanelIds((current) => current.filter((item) => item !== panelId))
+                    if (activePanelId === panelId) actions.panel.select(null)
+                  },
+                  onMenu: (event) => event.preventDefault(),
+                  onArrow: () => {},
+                  onDragStart: () => {},
+                }),
+              ),
             ),
             overflowed
               ? h(
@@ -1196,7 +1241,7 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
 
     // ── 插件入口 ────────────────────────────────────────────────────────────
     return {
-      inject: ['slots', 'locale', 'sessions', 'uiWorkspace', 'workspaces'],
+      inject: ['slots', 'locale', 'sessions', 'uiWorkspace', 'workspaces', 'layout'],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, { zh: ZH, en: EN }), 'dsh-tab: dictionaries')
 
@@ -1282,10 +1327,40 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
           }
         }
 
+        // 全局面板（插件页等）：读当前是否有面板盖在会话上，并能切回会话 / 切到某个面板
+        const layout = ctx.layout
+        const panelInfo = layout?.panelInfo
+        const panelApi = {
+          subscribe: (listener) => (panelInfo === undefined ? () => {} : panelInfo.subscribe(listener)),
+          getActive: () => panelInfo?.getSnapshot()?.activePanelId ?? null,
+          select(panelId) {
+            try {
+              layout.selectPanel(panelId)
+            } catch (error) {
+              console.error('dsh-tab: switching panel failed', error)
+            }
+          },
+          /** 面板标签标题：沿用侧栏面板按钮的名字，取不到就用面板 id。 */
+          label(panelId) {
+            try {
+              const entry = ctx.slots.entriesOfSlot('sidebar.panellist').find((item) => item.options.id === panelId)
+              const label = entry?.options.label
+              const text = typeof label === 'function' ? label() : label
+              if (typeof text === 'string' && text.length > 0) return text
+            } catch (error) {
+              /* 拿不到侧栏登记信息：退回面板 id */
+            }
+            return String(panelId)
+          },
+        }
+
         const actions = {
           store,
+          panel: panelApi,
           select(id) {
             try {
+              // 面板盖在会话上时，点会话标签先回到会话界面（不改变当前会话）
+              if (panelApi.getActive() !== null) layout.selectPanel(null)
               const current = currentSessionIdOf(sessions.list.getSnapshot())
               if (current === id) return
               uiWorkspace.openSession(id)
@@ -1353,6 +1428,7 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
           },
           create() {
             try {
+              if (panelApi.getActive() !== null) layout.selectPanel(null)
               uiWorkspace.startSession()
             } catch (error) {
               console.error('dsh-tab: creating conversation failed', error)
