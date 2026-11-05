@@ -21,7 +21,7 @@ Verified with the official DSH Desktop client; see [5 Compatibility](#5-compatib
 - **Delete** is irreversible and always asks for confirmation. Subagent sessions and transient blank placeholders (no persisted artifact) cannot be deleted.
 - **Archive / Unarchive** moves a session in and out of the active list without touching its disk content.
 - **Move to workspace** keeps history, title, archive state and derived-session relationships intact, rewrites the session's `cwd` to the target workspace, synchronizes the runtime `workingDirectory` projection for active agents, and updates the live writer's header in place so any pending tool calls keep landing on the new path. When the session's `cwd` already equals the target workspace path but its membership was never recorded, only the missing membership is repaired: no `cwd` rewrite, no artifact rewrite or move, and no session restart.
-- **Migrate Agent preset** rewrites the latest `agent-preset/selected` event (or the session header if no such event exists) so a session whose preset was renamed or removed can resume. Message history is never altered.
+- **Migrate Agent preset** switches a session to another preset. A running session is rebound in place through DSH's `agentPresets.recompose()` and the choice is recorded as an `agent-preset/selected` event, so it applies from the next message without restarting DSH (refused with `409 session-busy` while a turn is still running). A cold session has its latest `agent-preset/selected` event (or its header) rewritten and opens with the new preset; this also repairs a session whose preset was renamed or removed. Message history is never altered.
 
 ### 1.2 Session shortcuts
 
@@ -67,6 +67,8 @@ Verified with the official DSH Desktop client; see [5 Compatibility](#5-compatib
 ### 2.1 Title bar
 
 The right side of the title area exposes actions for the **current session**: **Archive / Unarchive**, **Favorites**, **Review-later**, **Tags / Notes**, **Move to workspace**, **Delete session**, and **More actions** (`⋯`), matching native DSH title-bar button sizing (28px height, transparent ghost style) and vector SVG icon design.
+
+DSH's read-only agent-preset label beside the title (e.g. "Standard mode" / "Creator mode") becomes clickable: it opens a preset menu and switches the session through the same path as **Migrate preset**, live and without a restart. The chip registers the label's slot id at a lower priority, so disabling this plugin restores the shipped label. The menu shares the plugin dialogs' "Dialog opacity" and frosted-glass settings, and every preset picker (this menu, the panel's "Migrate preset" dialog and bulk migration) lists each preset by localized name, id and description; presets that failed to load are disabled with the reason.
 
 ### 2.2 Sessions and workspaces management entry and interface
 

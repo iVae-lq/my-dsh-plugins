@@ -257,9 +257,11 @@ test("secondary dialog positioning: MoveDialog, MigratePresetDialog, and Annotat
 
   await app.flush();
   migrateHost.render();
-  const migrateSelect = nodes(migrateHost.tree, n => n.type === "select" && n.props?.className === "sm-viewSelect")[0];
-  assert.ok(migrateSelect, "MigratePresetDialog must render unified select dropdown");
-  assert.equal(migrateSelect.props.value, "PresetA", "MigratePresetDialog dropdown must default to current preset");
+  // The bare id <select> became a choice list (localized name, id, description).
+  const migrateChoices = nodes(migrateHost.tree, n => typeof n.type === "function" && n.type.name === "ChoiceList")[0];
+  assert.ok(migrateChoices, "MigratePresetDialog must render the preset choice list");
+  assert.equal(migrateChoices.props.value, "PresetA", "MigratePresetDialog choice must default to current preset");
+  assert.equal(migrateChoices.props.currentValue, "PresetA", "the current preset is badged as current");
 
   // No separate current preset row and no warning prompt
   const currentPresetEl = nodes(migrateHost.tree, n => n.props?.className === "sm-migrateCurrent")[0];
@@ -274,7 +276,7 @@ test("secondary dialog positioning: MoveDialog, MigratePresetDialog, and Annotat
   assert.equal(migrateConfirmBtn.props.disabled, true, "Confirm button must be disabled when same preset is selected");
 
   // Changing selection enables confirm button
-  migrateSelect.props.onChange({ target: { value: "PresetB" } });
+  migrateChoices.props.onChange("PresetB");
   migrateHost.render();
   const updatedMigrateConfirmBtn = nodes(migrateHost.tree, n => n.type === "button" && n.props?.className?.includes("sm-nativeDialogConfirm"))[0];
   assert.equal(updatedMigrateConfirmBtn.props.disabled, false, "Confirm button should be enabled when target differs");

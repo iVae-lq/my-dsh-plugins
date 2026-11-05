@@ -292,7 +292,23 @@ function isTopmostDialog(z) {
       "migrate.noPresets": "没有可用的目标预设",
       "migrate.same": "请选择与当前预设不同的目标预设",
       "migrate.confirm": "确认迁移",
-      "migrate.completed": "Agent 预设已迁移为 {preset}",
+      "migrate.completed": "Agent 预设已迁移为 {preset}；正在运行的会话从下一条消息起生效，无需重启",
+      "presetSwitch.hint": "点击切换本会话的 Agent 预设（从下一条消息起生效，无需重启）",
+      "presetSwitch.failed": "切换 Agent 预设失败：{reason}",
+      "presetSwitch.loadFailed": "读取 Agent 预设列表失败：{reason}",
+      "presetSwitch.menuTitle": "切换本会话的 Agent 预设",
+      "presetSwitch.note": "从下一条消息起生效；回合运行中不能切换。",
+      "presetSwitch.current": "当前",
+      "presetSwitch.brokenNote": "加载失败，无法切换",
+      "presetSwitch.missing": "该预设已不存在",
+      "preset.name.standard": "标准模式",
+      "preset.name.cordis": "创造模式",
+      "preset.name.ptc": "PTC 模式",
+      "preset.name.minimal": "极简模式",
+      "preset.desc.standard": "处理代码、文件和资料，适合大多数任务。Agent 会按需使用检索、编辑和终端等工具。",
+      "preset.desc.cordis": "用对话定制 DSH：让 Agent 编写插件，添加新功能或界面；也能组合工具和提示词，创建自己的模式。",
+      "preset.desc.ptc": "包含标准模式的所有能力，更适合批量调用工具，并对结果进行筛选、整理、去重、统计或汇总的任务。",
+      "preset.desc.minimal": "Agent 使用终端和图片读取工具，并支持上下文压缩，适合测试和对比其基础表现。",
       "confirm.delete.title": "删除会话",
       "confirm.delete.desc": "「{title}」：删除，不可恢复",
       "confirm.delete.running": "该会话正在运行，删除将立即中断它。",
@@ -663,7 +679,23 @@ function isTopmostDialog(z) {
       "migrate.noPresets": "No target presets are available",
       "migrate.same": "Choose a target preset different from the current preset",
       "migrate.confirm": "Migrate",
-      "migrate.completed": "Agent preset migrated to {preset}",
+      "migrate.completed": "Agent preset migrated to {preset}; a running session uses it from the next message, no restart needed",
+      "presetSwitch.hint": "Click to switch this session's agent preset (applies from the next message, no restart)",
+      "presetSwitch.failed": "Could not switch the agent preset: {reason}",
+      "presetSwitch.loadFailed": "Could not load agent presets: {reason}",
+      "presetSwitch.menuTitle": "Switch this session's agent preset",
+      "presetSwitch.note": "Applies from the next message; cannot switch while a turn is running.",
+      "presetSwitch.current": "Current",
+      "presetSwitch.brokenNote": "Failed to load; cannot switch",
+      "presetSwitch.missing": "This preset no longer exists",
+      "preset.name.standard": "Standard mode",
+      "preset.name.cordis": "Creator mode",
+      "preset.name.ptc": "PTC mode",
+      "preset.name.minimal": "Minimal mode",
+      "preset.desc.standard": "Work with code, files, and information. Suitable for most tasks, with search, editing, terminal commands, and other tools available as needed.",
+      "preset.desc.cordis": "Customize DSH through conversation. Let the agent write plugins that add features or UI, or combine tools and prompts to create your own mode.",
+      "preset.desc.ptc": "Includes all Standard mode capabilities. Better suited to tasks that call tools in batches and then filter, organize, deduplicate, count, or summarize the results.",
+      "preset.desc.minimal": "The agent uses a terminal and image reading, with context compaction. Useful for testing and comparing its basic performance.",
       "confirm.delete.title": "Delete session",
       "confirm.delete.desc": "\"{title}\": Delete, cannot be undone",
       "confirm.delete.running": "This session is running; deleting will interrupt it immediately.",
@@ -846,7 +878,7 @@ function isTopmostDialog(z) {
       ".sm-panelDialog option,.sm-nativeDialog option,.sm-settingsCard option,.sm-headerMenu option{background-color:var(--dsw-alias-bg-layer-3,#fff);color:var(--dsw-alias-label-primary,#111)}",
       ".sm-panelDialog option:checked,.sm-nativeDialog option:checked,.sm-settingsCard option:checked,.sm-headerMenu option:checked{background-color:var(--dsw-alias-bg-layer-3,#fff);color:var(--dsw-alias-state-business-primary,#356ae6)}",
       ".sm-panelDialog option:disabled,.sm-nativeDialog option:disabled,.sm-settingsCard option:disabled,.sm-headerMenu option:disabled{color:var(--dsw-alias-label-tertiary,#888)}",
-      ".sm-nativeDialog,.sm-panelDialog,.sm-migrateDialog,.sm-settingsCard{--sm-dialog-surface:var(--dsw-alias-bg-layer-1,var(--sm-dialog-surface-fallback,#fff));--sm-dialog-fill:color-mix(in srgb,var(--sm-dialog-surface) var(--sm-dialog-opacity,100%),transparent)}",
+      ".sm-presetMenu,.sm-nativeDialog,.sm-panelDialog,.sm-migrateDialog,.sm-settingsCard{--sm-dialog-surface:var(--dsw-alias-bg-layer-1,var(--sm-dialog-surface-fallback,#fff));--sm-dialog-fill:color-mix(in srgb,var(--sm-dialog-surface) var(--sm-dialog-opacity,100%),transparent)}",
       ".sm-settingsSlider{display:flex;align-items:center;gap:8px;flex:0 0 280px;width:280px;min-width:280px;max-width:280px;box-sizing:border-box;justify-content:flex-end}",
       ".sm-settingsRange{flex:1 1 auto;min-width:70px;margin:0;cursor:pointer;accent-color:var(--dsw-alias-state-business-primary,#356ae6)}",
       ".sm-settingsRange:disabled{cursor:not-allowed}",
@@ -864,8 +896,8 @@ function isTopmostDialog(z) {
       // fallback surface colour required by the dialog-opacity fill. The
       // light/dark state itself is mirrored onto <html data-sm-theme> by
       // smApplyTheme(), which reads body[data-ds-dark-theme].
-      "[data-sm-theme=light] .sm-nativeDialog,[data-sm-theme=light] .sm-panelDialog,[data-sm-theme=light] .sm-migrateDialog,[data-sm-theme=light] .sm-settingsCard{--sm-dialog-surface-fallback:#fff}",
-      "[data-sm-theme=dark] .sm-nativeDialog,[data-sm-theme=dark] .sm-panelDialog,[data-sm-theme=dark] .sm-migrateDialog,[data-sm-theme=dark] .sm-settingsCard{--sm-dialog-surface-fallback:#1f1f23}",
+      "[data-sm-theme=light] .sm-presetMenu,[data-sm-theme=light] .sm-nativeDialog,[data-sm-theme=light] .sm-panelDialog,[data-sm-theme=light] .sm-migrateDialog,[data-sm-theme=light] .sm-settingsCard{--sm-dialog-surface-fallback:#fff}",
+      "[data-sm-theme=dark] .sm-presetMenu,[data-sm-theme=dark] .sm-nativeDialog,[data-sm-theme=dark] .sm-panelDialog,[data-sm-theme=dark] .sm-migrateDialog,[data-sm-theme=dark] .sm-settingsCard{--sm-dialog-surface-fallback:#1f1f23}",
       ".sm-panelDialog{max-height:min(640px,calc(100vh - 32px))}.sm-panelDialog .sm-panel{min-width:0;overflow:hidden}",
       ".sm-panelTools{display:flex;flex-direction:column;gap:8px;flex:none;padding:2px 0 6px}",
       ".sm-queryInput,.sm-viewSelect{box-sizing:border-box;width:100%;min-width:0;height:32px;padding:5px 9px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:8px;background:var(--dsw-alias-bg-layer-2,#fff);color:var(--dsw-alias-label-primary,#111);font:inherit;font-size:12px;line-height:20px;transition:border-color .15s ease,box-shadow .15s ease}",
@@ -972,7 +1004,7 @@ function isTopmostDialog(z) {
       // Scoped to .sm-ocPanel so the annotation surface (also .sm-panelDialog) is untouched.
       // Every fill inside the page is a translucent neutral (--sm-oc-fill*) rather than an
       // opaque theme layer, so controls blend with any dialog opacity / glass setting.
-      "html[data-sm-translucent] .sm-nativeDialog,html[data-sm-translucent] .sm-panelDialog,html[data-sm-translucent] .sm-migrateDialog,html[data-sm-translucent] .sm-settingsCard{-webkit-backdrop-filter:blur(var(--sm-glass-blur,24px)) saturate(1.15);backdrop-filter:blur(var(--sm-glass-blur,24px)) saturate(1.15)}",
+      "html[data-sm-translucent] .sm-presetMenu,html[data-sm-translucent] .sm-nativeDialog,html[data-sm-translucent] .sm-panelDialog,html[data-sm-translucent] .sm-migrateDialog,html[data-sm-translucent] .sm-settingsCard{-webkit-backdrop-filter:blur(var(--sm-glass-blur,24px)) saturate(1.15);backdrop-filter:blur(var(--sm-glass-blur,24px)) saturate(1.15)}",
       ".sm-panelDialog.sm-ocPanel{--sm-dialog-surface:var(--dsw-alias-bg-base,var(--dsw-alias-bg-layer-1,#1f1f23));--sm-oc-fill:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 6%,transparent);--sm-oc-fill-hover:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 10%,transparent);--sm-oc-fill-active:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 15%,transparent);--sm-oc-line:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 14%,transparent);position:fixed!important;inset:var(--dsh-windows-titlebar-height,0px) 0 0 0!important;margin:0!important;width:auto!important;height:auto!important;max-width:none!important;max-height:none!important;border:0!important;border-radius:0!important;box-shadow:none!important}",
       "html[data-windows-titlebar] .sm-panelDialog.sm-ocPanel{border-radius:14px 14px 0 0!important}",
       ".sm-panelDialog.sm-ocPanel .sm-nativeDialogHeader{border-bottom:0!important;min-height:44px!important;padding:6px 14px!important;background:transparent}",
@@ -1034,6 +1066,30 @@ function isTopmostDialog(z) {
       ".sm-ocCtxLabel{min-width:0;overflow:hidden;text-overflow:ellipsis}",
       ".sm-ocCtxDanger,.sm-ocCtxDanger .sm-ocCtxIcon{color:var(--dsw-alias-state-error-primary,#d92d20)}.sm-ocCtxDanger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover-danger)}",
       ".sm-ocCtxSep{height:.5px;margin:4px 6px;background:var(--dsw-alias-border-l2,rgba(128,128,128,.28))}",
+      // Header agent-preset chip: shadows DSH's read-only label with the same
+      // look (AgentPresetLabel), plus hover/focus states for the switch menu.
+      ".sm-presetChip{all:unset;box-sizing:border-box;display:inline-flex;align-items:center;gap:4px;max-width:200px;height:22px;padding:0 4px 0 0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:22px;white-space:nowrap;overflow:hidden;cursor:pointer;transition:background-color .12s ease,color .12s ease}",
+      ".sm-presetChip:hover:not(:disabled),.sm-presetChip-open{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}.sm-presetChip:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.sm-presetChip:disabled{cursor:progress;opacity:.7}",
+      ".sm-presetChipText{overflow:hidden;text-overflow:ellipsis}.sm-presetChipIcon{opacity:.7;flex:none}.sm-presetChipChevron{opacity:.55;flex:none;transition:transform .12s ease}.sm-presetChip-open .sm-presetChipChevron{transform:rotate(180deg)}",
+      "@container (width<=540px){.sm-presetChip{display:none}}",
+      // Header preset menu: it joins the dialog-surface rules above (fill,
+      // theme fallback, translucent blur), so the "Dialog opacity" slider and
+      // the frosted-glass setting apply to it exactly as to the dialogs.
+      ".sm-presetMenu{position:fixed;z-index:10000;box-sizing:border-box;width:300px;max-width:calc(100vw - 16px);max-height:min(460px,calc(100vh - 80px));overflow-y:auto;padding:4px;border-radius:10px;border:.5px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));background:var(--sm-dialog-fill);box-shadow:0 8px 28px rgba(0,0,0,.28);color:var(--dsw-alias-label-primary,#111);font-size:13px;line-height:18px;user-select:none;-webkit-user-select:none}",
+      ".sm-presetMenuHead{padding:6px 10px 4px;font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary,#888)}",
+      ".sm-presetMenuNote{margin-top:4px;padding:6px 10px 4px;border-top:.5px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,#888)}",
+      // Agent-preset choice rows, shared by the header menu and the migrate dialogs:
+      // localized name, preset id, description, current badge, load problem.
+      ".sm-choiceList{display:flex;flex-direction:column;gap:2px;max-height:min(300px,45vh);overflow-y:auto}",
+      ".sm-choiceItem{display:flex;align-items:flex-start;gap:8px;width:100%;box-sizing:border-box;padding:7px 10px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer;outline:none}",
+      ".sm-choiceItem:hover:not(:disabled),.sm-choiceItem:focus-visible{background:var(--dsw-alias-interactive-bg-hover)}.sm-choiceItem:disabled{opacity:.45;cursor:not-allowed}.sm-choiceItem-selected{background:var(--dsw-alias-interactive-bg-active)}",
+      ".sm-choiceCheck{flex:none;width:14px;height:18px;display:inline-flex;align-items:center;justify-content:center;color:var(--dsw-alias-state-business-primary,#356ae6)}",
+      ".sm-choiceCopy{display:flex;flex-direction:column;gap:2px;min-width:0}",
+      ".sm-choiceName{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px;font-weight:500;line-height:18px}",
+      ".sm-choiceHint{font-size:11px;font-weight:400;color:var(--dsw-alias-label-tertiary,#888)}",
+      ".sm-choiceBadge{font-size:11px;font-weight:400;line-height:16px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary,#555)}",
+      ".sm-choiceDesc{font-size:12px;line-height:17px;color:var(--dsw-alias-label-secondary,#555);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
+      ".sm-choiceProblem{color:var(--dsw-alias-state-error-primary,#d92d20)}",
       "@media(max-width:860px){.sm-ocWrap{grid-template-columns:minmax(0,1fr);padding:16px 16px 0}.sm-ocSide{display:none}.sm-ocSearch,.sm-ocMainHead,.sm-ocMainBody{grid-column:1}.sm-ocNarrow{padding:12px 16px 0}}",
       "body:has(.sm-ocPanel) .sm-confirmDialog.sm-nativeDialogLayer:not(.sm-confirmDialog-anchored),body:has(.sm-ocPanel) .sm-bulkDialog.sm-nativeDialogLayer:not(.sm-bulkDialog-anchored),body:has(.sm-ocPanel) .sm-annotationDialog.sm-confirmDialog.sm-nativeDialogLayer:not(.sm-annotationDialog-anchored){inset:50% auto auto 50%!important;transform:translate(-50%,-50%)!important}",
     ].join("");
@@ -1395,6 +1451,310 @@ function isTopmostDialog(z) {
         return portal(vnode, root);
       }
       return vnode;
+    }
+
+    // ---- Header agent-preset switch -------------------------------------
+    // DSH renders the session's preset as a read-only label in
+    // `conversation.session.header.actions` (id "agent-preset"). We register the
+    // same id at a lower slot priority, which the slot core renders instead; the
+    // shipped label returns as soon as this plugin is disabled. Choosing a preset
+    // runs the same `/preset-migrate` path as the panel's "Migrate preset", which
+    // rebinds a running Agent in place, so neither entry point needs a restart.
+    const PRESET_SHIPPED = { standard: true, cordis: true, ptc: true, minimal: true };
+    function presetDisplayName(t, id, row) {
+      if (row && typeof row.name === "string" && row.name) return row.name;
+      if (PRESET_SHIPPED[id] === true && typeof t === "function") {
+        const key = "preset.name." + id;
+        const value = t(key);
+        if (typeof value === "string" && value && value !== key) return value;
+      }
+      return id;
+    }
+    let presetRosterCache = null;
+    let presetRosterPending = null;
+    function loadPresetRoster(force) {
+      if (!force && presetRosterCache) return Promise.resolve(presetRosterCache);
+      if (presetRosterPending) return presetRosterPending;
+      presetRosterPending = fetchApi("/presets").then((data) => {
+        if (!data || data.ok !== true) throw new Error((data && data.error) || "presets unavailable");
+        const presets = Array.isArray(data.result && data.result.presets) ? data.result.presets.filter((row) => row && typeof row.id === "string") : [];
+        presetRosterCache = presets;
+        return presets;
+      }).finally(() => { presetRosterPending = null; });
+      return presetRosterPending;
+    }
+    function PresetChipGlyph() {
+      // Same glyph as DSH's AgentPresetLabel (DeepSeek Harness, MIT).
+      return h("svg", { width: 14, height: 14, viewBox: "0 0 16 16", fill: "none", "aria-hidden": "true", className: "sm-presetChipIcon", strokeWidth: 1 },
+        h("path", { fill: "currentColor", d: "M6.51867 12.3282C7.29816 12.6011 8.16475 12.6514 9.02269 12.4216C9.57879 12.2726 10.0784 12.0185 10.5087 11.6888C10.7819 12.0555 11.1606 12.3304 11.5913 12.4805C10.9688 13.029 10.2149 13.4478 9.35911 13.6771C8.13946 14.0038 6.90632 13.8971 5.82126 13.4533C6.15821 13.1562 6.4021 12.7652 6.51867 12.3282ZM9.17629 2.89409C11.1101 3.34433 12.739 4.81872 13.2889 6.87043C13.4219 7.3665 13.4811 7.8649 13.4774 8.35466C13.0924 8.13213 12.6422 8.01837 12.1741 8.05276L12.1711 8.05257C12.1539 7.77199 12.109 7.48889 12.0334 7.20684C11.6363 5.72533 10.5048 4.6372 9.13549 4.22844C9.25559 3.87667 9.29214 3.49087 9.22309 3.09892C9.2108 3.02922 9.19451 2.96108 9.17629 2.89409ZM4.7311 3.89107L4.78302 4.11879C4.87648 4.4488 5.04146 4.74263 5.25579 4.98896C3.98078 6.01355 3.35848 7.72904 3.8089 9.41059C3.81828 9.44559 3.82866 9.48025 3.83885 9.51479C3.38217 9.61268 2.98548 9.84137 2.68107 10.1556C2.63414 10.022 2.5897 9.88632 2.55244 9.74726C1.93301 7.43489 2.86717 5.07173 4.71504 3.76697L4.7311 3.89107Z" }),
+        h("path", { stroke: "currentColor", d: "M7.99136 5.28105C8.87501 5.28105 9.59136 4.56471 9.59136 3.68105C9.59136 2.7974 8.87501 2.08105 7.99136 2.08105C7.1077 2.08105 6.39136 2.7974 6.39136 3.68105C6.39136 4.56471 7.1077 5.28105 7.99136 5.28105Z" }),
+        h("path", { stroke: "currentColor", d: "M3.94009 12.9417C4.82374 12.9417 5.54009 12.2254 5.54009 11.3417C5.54009 10.458 4.82374 9.7417 3.94009 9.7417C3.05643 9.7417 2.34009 10.458 2.34009 11.3417C2.34009 12.2254 3.05643 12.9417 3.94009 12.9417Z" }),
+        h("path", { stroke: "currentColor", d: "M12.0851 12.9417C12.9688 12.9417 13.6851 12.2254 13.6851 11.3417C13.6851 10.458 12.9688 9.7417 12.0851 9.7417C11.2015 9.7417 10.4851 10.458 10.4851 11.3417C10.4851 12.2254 11.2015 12.9417 12.0851 12.9417Z" }));
+    }
+    function PresetChipChevron() {
+      return h("svg", { width: 10, height: 10, viewBox: "0 0 10 10", fill: "none", "aria-hidden": "true", className: "sm-presetChipChevron" },
+        h("path", { d: "M2.5 3.75L5 6.25L7.5 3.75", stroke: "currentColor", strokeWidth: 1.2, strokeLinecap: "round", strokeLinejoin: "round" }));
+    }
+    function PresetCheckGlyph() {
+      return h("svg", { width: 14, height: 14, viewBox: "0 0 12 12", fill: "none", "aria-hidden": "true" },
+        h("path", { d: "M2.5 6.2L5 8.5L9.5 3.5", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" }));
+    }
+    function presetDescriptionText(t, id, row) {
+      if (row && typeof row.description === "string" && row.description) return row.description;
+      if (PRESET_SHIPPED[id] === true && typeof t === "function") {
+        const key = "preset.desc." + id;
+        const value = t(key);
+        if (typeof value === "string" && value && value !== key) return value;
+      }
+      return undefined;
+    }
+    /**
+     * Choice rows for every preset picker: roster order (with names and
+     * descriptions) first, then ids only an older /preset-scan reports. A
+     * current preset missing from both is listed first, flagged and disabled.
+     */
+    function presetChoiceOptions(t, roster, extraIds, currentId) {
+      const rows = Array.isArray(roster) ? roster.filter((row) => row && typeof row.id === "string" && row.id) : [];
+      const known = new Set(rows.map((row) => row.id));
+      for (const id of Array.isArray(extraIds) ? extraIds : []) {
+        if (typeof id === "string" && id && !known.has(id)) { rows.push({ id }); known.add(id); }
+      }
+      const options = rows.map((row) => {
+        const name = presetDisplayName(t, row.id, row);
+        const broken = row.broken !== undefined && row.broken !== null;
+        return {
+          value: row.id,
+          label: name,
+          hint: name !== row.id ? row.id : undefined,
+          description: presetDescriptionText(t, row.id, row),
+          disabled: broken,
+          problem: broken ? t("presetSwitch.brokenNote") : undefined,
+          title: broken ? String(row.broken) : undefined
+        };
+      });
+      if (typeof currentId === "string" && currentId && !known.has(currentId)) {
+        const name = presetDisplayName(t, currentId);
+        options.unshift({ value: currentId, label: name, hint: name !== currentId ? currentId : undefined, disabled: true, problem: t("presetSwitch.missing") });
+      }
+      return options;
+    }
+    /** Inner markup of one choice row: check, name + id (+ badge), description, problem. */
+    function choiceItemChildren(opt, checked, badge) {
+      return [
+        h("span", { key: "check", className: "sm-choiceCheck", "aria-hidden": "true" }, checked ? h(PresetCheckGlyph) : null),
+        h("span", { key: "copy", className: "sm-choiceCopy" },
+          h("span", { className: "sm-choiceName" },
+            opt.label,
+            opt.hint ? h("span", { className: "sm-choiceHint" }, opt.hint) : null,
+            badge ? h("span", { className: "sm-choiceBadge" }, badge) : null),
+          opt.description ? h("span", { className: "sm-choiceDesc" }, opt.description) : null,
+          opt.problem ? h("span", { className: "sm-choiceDesc sm-choiceProblem" }, opt.problem) : null)
+      ];
+    }
+    /** Radio list used by the migrate dialogs in place of a bare id <select>. */
+    function ChoiceList(props) {
+      const options = Array.isArray(props.options) ? props.options : [];
+      const onChange = typeof props.onChange === "function" ? props.onChange : () => {};
+      return h("div", { className: "sm-choiceList", role: "radiogroup", "aria-label": props.ariaLabel },
+        options.map((opt) => {
+          const selected = opt.value === props.value;
+          const isCurrent = props.currentValue !== undefined && opt.value === props.currentValue;
+          return h("button", {
+            key: opt.value,
+            type: "button",
+            role: "radio",
+            "aria-checked": selected,
+            "data-choice-value": opt.value,
+            className: "sm-choiceItem" + (selected ? " sm-choiceItem-selected" : ""),
+            disabled: props.disabled === true || opt.disabled === true,
+            title: opt.title,
+            onClick: () => onChange(opt.value)
+          }, choiceItemChildren(opt, selected, isCurrent ? props.currentLabel : undefined));
+        }));
+    }
+    /**
+     * Header preset menu, portaled to the overlay root on the dialog surface
+     * (opacity + frosted glass). Closes like the row context menu: outside
+     * press (swallowing the following click), Escape, blur, resize, and
+     * scrolling anywhere but inside the menu.
+     */
+    function HeaderPresetMenu(props) {
+      const { x, y, options, currentValue, onPick, onClose } = props;
+      const t = typeof props.t === "function" ? props.t : (key) => key;
+      const menuRef = useRef(null);
+      const [position, setPosition] = useState({ x, y });
+      useIsoLayoutEffect(() => {
+        const el = menuRef.current;
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const nextX = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
+        const nextY = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
+        setPosition(prev => (prev.x === nextX && prev.y === nextY ? prev : { x: nextX, y: nextY }));
+      }, [x, y, options.length]);
+      useEffect(() => {
+        const swallowNextClick = () => {
+          const block = (event) => { event.stopPropagation(); event.preventDefault(); };
+          window.addEventListener("click", block, true);
+          setTimeout(() => window.removeEventListener("click", block, true), 350);
+        };
+        const inside = (event) => Boolean(menuRef.current && typeof menuRef.current.contains === "function" && menuRef.current.contains(event.target));
+        const onPointerDown = (event) => {
+          if (inside(event)) return;
+          swallowNextClick();
+          onClose();
+        };
+        const onKeyDown = (event) => {
+          if (event.key !== "Escape") return;
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+        };
+        const onScroll = (event) => { if (!inside(event)) onClose(); };
+        const dismiss = () => onClose();
+        document.addEventListener("pointerdown", onPointerDown, true);
+        document.addEventListener("keydown", onKeyDown, true);
+        window.addEventListener("blur", dismiss);
+        window.addEventListener("resize", dismiss);
+        window.addEventListener("scroll", onScroll, true);
+        return () => {
+          document.removeEventListener("pointerdown", onPointerDown, true);
+          document.removeEventListener("keydown", onKeyDown, true);
+          window.removeEventListener("blur", dismiss);
+          window.removeEventListener("resize", dismiss);
+          window.removeEventListener("scroll", onScroll, true);
+        };
+      }, [onClose]);
+      useEffect(() => {
+        const el = menuRef.current;
+        if (!el || typeof el.querySelector !== "function") return;
+        const target = el.querySelector('[aria-checked="true"]') || el.querySelector(".sm-choiceItem");
+        if (target && typeof target.focus === "function") { try { target.focus({ preventScroll: true }); } catch (_) {} }
+      }, []);
+      const onMenuKeyDown = (event) => {
+        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+        const el = menuRef.current;
+        if (!el || typeof el.querySelectorAll !== "function") return;
+        const items = Array.from(el.querySelectorAll(".sm-choiceItem:not(:disabled)"));
+        if (items.length === 0) return;
+        event.preventDefault();
+        const index = items.indexOf(document.activeElement);
+        const next = event.key === "Home" ? 0
+          : event.key === "End" ? items.length - 1
+            : event.key === "ArrowDown" ? (index + 1) % items.length
+              : (index - 1 + items.length) % items.length;
+        items[next].focus();
+      };
+      const menu = h("div", { className: "sm-overlayLayer" },
+        h("div", {
+          ref: menuRef,
+          className: "sm-presetMenu",
+          role: "menu",
+          "aria-label": t("presetSwitch.menuTitle"),
+          style: { left: position.x + "px", top: position.y + "px" },
+          onKeyDown: onMenuKeyDown,
+          onContextMenu: (event) => event.preventDefault()
+        },
+          h("div", { className: "sm-presetMenuHead" }, t("presetSwitch.menuTitle")),
+          options.map((opt) => {
+            const checked = opt.value === currentValue;
+            return h("button", {
+              key: opt.value,
+              type: "button",
+              role: "menuitemradio",
+              "aria-checked": checked,
+              "data-choice-value": opt.value,
+              className: "sm-choiceItem" + (checked ? " sm-choiceItem-selected" : ""),
+              disabled: opt.disabled === true && !checked,
+              title: opt.title,
+              onClick: () => { onClose(); onPick(opt.value); }
+            }, choiceItemChildren(opt, checked));
+          }),
+          h("div", { className: "sm-presetMenuNote" }, t("presetSwitch.note"))
+        )
+      );
+      return renderInOverlay(menu);
+    }
+    function HeaderPresetChip(props) {
+      const t = typeof props.t === "function" ? props.t : (key) => key;
+      const sessionId = props.sessionId;
+      const useSessions = props.useSessions;
+      const onMigrate = props.onMigrate;
+      // Read the hook value during render only (calling it from a handler blanks
+      // the whole header slot, see HeaderAction).
+      const preset = typeof useSessions === "function"
+        ? useSessions((state) => {
+          const value = state && state.byId && state.byId[sessionId] ? state.byId[sessionId].projectionValues?.agentPreset : undefined;
+          return typeof value === "string" ? value : undefined;
+        })
+        : undefined;
+      const buttonRef = useRef(null);
+      const aliveRef = useRef(true);
+      const [roster, setRoster] = useState(() => presetRosterCache);
+      const [menu, setMenu] = useState(null);
+      const [busy, setBusy] = useState(false);
+      useEffect(() => {
+        aliveRef.current = true;
+        return () => { aliveRef.current = false; };
+      }, []);
+      useEffect(() => {
+        if (preset === undefined || roster) return;
+        loadPresetRoster(false).then((list) => { if (aliveRef.current) setRoster(list); }).catch(() => {});
+      }, [preset]);
+      const closeMenu = useMemo(() => () => setMenu(null), []);
+      if (preset === undefined) return null;
+      const currentRow = roster ? roster.find((row) => row.id === preset) : undefined;
+      const label = presetDisplayName(t, preset, currentRow);
+      const switchTo = async (target) => {
+        if (target === preset || typeof onMigrate !== "function") return;
+        setBusy(true);
+        try {
+          await onMigrate(sessionId, target);
+        } catch (error) {
+          try { window.alert(t("presetSwitch.failed", { reason: error instanceof Error ? error.message : String(error) })); } catch (_) {}
+        } finally {
+          if (aliveRef.current) setBusy(false);
+        }
+      };
+      const openMenu = async () => {
+        const el = buttonRef.current;
+        if (!el || busy) return;
+        const rect = el.getBoundingClientRect();
+        let list = roster;
+        try {
+          list = await loadPresetRoster(true);
+        } catch (error) {
+          if (!list) {
+            try { window.alert(t("presetSwitch.loadFailed", { reason: error instanceof Error ? error.message : String(error) })); } catch (_) {}
+            return;
+          }
+        }
+        if (!aliveRef.current) return;
+        setRoster(list);
+        setMenu({ x: rect.left, y: rect.bottom + 4, presets: list });
+      };
+      const options = menu === null ? [] : presetChoiceOptions(t, menu.presets, [], preset);
+      return h(React.Fragment, null,
+        h("button", {
+          ref: buttonRef,
+          type: "button",
+          className: "sm-presetChip" + (menu !== null ? " sm-presetChip-open" : ""),
+          title: (currentRow && currentRow.description ? currentRow.description + "\n" : "") + t("presetSwitch.hint"),
+          "aria-haspopup": "menu",
+          "aria-expanded": menu !== null,
+          disabled: busy,
+          onClick: () => { if (menu !== null) setMenu(null); else void openMenu(); }
+        },
+          h(PresetChipGlyph),
+          h("span", { className: "sm-presetChipText" }, label),
+          h(PresetChipChevron)),
+        menu !== null ? h(HeaderPresetMenu, { x: menu.x, y: menu.y, options, currentValue: preset, onPick: (id) => { void switchTo(id); }, onClose: closeMenu, t }) : null);
+    }
+    /** Keep a chip failure inside its own entry instead of blanking every header action. */
+    class SafeHeaderPresetChip extends React.Component {
+      constructor(props) { super(props); this.state = { failed: false }; }
+      static getDerivedStateFromError() { return { failed: true }; }
+      componentDidCatch(error) { try { console.error("[dsh-session-manager] header preset chip crashed:", error); } catch (_) {} }
+      render() { return this.state.failed ? null : h(HeaderPresetChip, this.props); }
     }
 
     function OverlayLayer({ children, className, style, onBackdropClick, role = "presentation", onKeyDown }) {
@@ -3472,10 +3832,13 @@ function isTopmostDialog(z) {
             description ? h("div", { className: "sm-bulkDialogSummary" }, description) : null,
             options.length === 0
               ? h("div", { className: "sm-empty" }, t("migrate.noPresets"))
-              : h("select", { className: "sm-viewSelect", value, onChange: (e) => setValue(e.target.value), "aria-label": title, autoFocus: true },
-                  h("option", { value: "" }, "—"),
-                  options.map((opt) => h("option", { key: opt.value, value: opt.value }, opt.label))
-                )
+              : options.some((opt) => opt && (opt.hint !== undefined || opt.description !== undefined))
+                // Rich choices (agent presets): name, id and description per row.
+                ? h(ChoiceList, { options, value, onChange: setValue, ariaLabel: title })
+                : h("select", { className: "sm-viewSelect", value, onChange: (e) => setValue(e.target.value), "aria-label": title, autoFocus: true },
+                    h("option", { value: "" }, "—"),
+                    options.map((opt) => h("option", { key: opt.value, value: opt.value }, opt.label))
+                  )
           ),
           h("div", { className: "sm-nativeDialogFooter" },
             h("button", { type: "button", className: "sm-nativeDialogButton sm-nativeDialogCancel", onClick: onCancel }, t("bulk.dialog.cancel")),
@@ -3995,9 +4358,17 @@ function isTopmostDialog(z) {
       const fallbackPreset = props.currentPreset || "";
       const [scan, setScan] = useState(null);
       const [target, setTarget] = useState("");
+      // Display metadata (localized name, id, description) for the choices.
+      const [roster, setRoster] = useState(() => presetRosterCache);
       // Claim a fresh z-index so this popup sits above any earlier popup.
       const [zIndex] = useState(() => open ? nextDialogZ() : 0);
       const floatingCoords = useFloatingPosition(props.anchor, open, { placement: "bottom-end", dialogWidth: 360, dialogHeight: 320 });
+      useEffect(() => {
+        if (!open) return;
+        let alive = true;
+        loadPresetRoster(true).then((list) => { if (alive) setRoster(list); }).catch(() => { /* fall back to scan ids */ });
+        return () => { alive = false; };
+      }, [open]);
       useEffect(() => {
         if (!open || !sessionId) return;
         let alive = true;
@@ -4070,14 +4441,14 @@ function isTopmostDialog(z) {
       if (!open) return null;
 
       const currentPreset = (scan && scan.ok && scan.row && (scan.row.finalPreset || scan.row.headerPreset)) || fallbackPreset || "—";
-      const presets = scan && scan.ok
-        ? Array.from(new Set((scan.availablePresets || []).filter((preset) => typeof preset === "string" && preset.length > 0))).sort()
+      const scanIds = scan && scan.ok
+        ? (scan.availablePresets || []).filter((preset) => typeof preset === "string" && preset.length > 0)
         : [];
-      const allPresets = Array.from(new Set([
-        ...(currentPreset && currentPreset !== "—" ? [currentPreset] : []),
-        ...presets
-      ])).sort();
-      const selectedTarget = target || (currentPreset !== "—" ? currentPreset : (allPresets[0] || ""));
+      const choiceOptions = scan && scan.ok
+        ? presetChoiceOptions(t, roster, scanIds, currentPreset !== "—" ? currentPreset : undefined)
+        : [];
+      const firstChoosable = choiceOptions.find((opt) => opt.disabled !== true);
+      const selectedTarget = target || (currentPreset !== "—" ? currentPreset : (firstChoosable ? firstChoosable.value : ""));
       const isSame = Boolean(selectedTarget && currentPreset && selectedTarget === currentPreset && currentPreset !== "—");
       const ready = Boolean(selectedTarget && !isSame && selectedTarget !== "—");
       const body = h("div", { className: "sm-nativeDialogBody" },
@@ -4086,19 +4457,18 @@ function isTopmostDialog(z) {
           ? h("div", { className: "sm-empty" }, t("busy.processing"))
           : !scan.ok
             ? h("div", { className: "sm-error", role: "alert" }, scan.error || "scan failed")
-            : allPresets.length === 0
+            : choiceOptions.length === 0
               ? h("div", { className: "sm-moveLabel" }, t("migrate.noPresets"))
               : h("div", { className: "sm-moveSection" },
-                  h("select", {
-                    className: "sm-viewSelect",
+                  h(ChoiceList, {
+                    options: choiceOptions,
                     value: selectedTarget,
-                    onChange: (e) => setTarget(e.target.value),
-                    "aria-label": t("migrate.target"),
-                    autoFocus: true,
+                    onChange: setTarget,
+                    currentValue: currentPreset !== "—" ? currentPreset : undefined,
+                    currentLabel: t("presetSwitch.current"),
+                    ariaLabel: t("migrate.target"),
                     disabled: busy
-                  },
-                    allPresets.map((preset) => h("option", { key: preset, value: preset }, preset))
-                  )
+                  })
                 )
       );
       const topPx = floatingCoords ? floatingCoords.top : (props.anchor && typeof props.anchor.top === "number" ? props.anchor.top : null);
@@ -5205,13 +5575,18 @@ function isTopmostDialog(z) {
         const firstId = [...selectedIds][0];
         setBulkPresetDraft({ mode: "preset" });
         setBulkPresetOptions([]);
-        fetchApi("/preset-scan?sessionId=" + encodeURIComponent(firstId)).then((data) => {
-          if (!data || !data.ok) return;
-          const result = data.result || {};
+        // /presets adds localized names and descriptions; an older host without
+        // it still yields the bare ids from the scan.
+        Promise.all([
+          fetchApi("/preset-scan?sessionId=" + encodeURIComponent(firstId)).catch(() => null),
+          loadPresetRoster(true).catch(() => null)
+        ]).then(([data, roster]) => {
+          const result = data && data.ok ? (data.result || {}) : {};
           const presets = Array.isArray(result.availablePresets)
             ? result.availablePresets
             : (result.rows && Array.isArray(result.rows.availablePresets) ? result.rows.availablePresets : []);
-          setBulkPresetOptions(presets.filter(p => typeof p === "string" && p.length > 0).map(p => ({ value: p, label: p })));
+          if (!roster && presets.length === 0) return;
+          setBulkPresetOptions(presetChoiceOptions(t, roster, presets.filter(p => typeof p === "string" && p.length > 0), undefined));
         }).catch(() => { /* surface empty list */ });
       };
       const onBulkPresetApply = (value) => {
@@ -7741,6 +8116,17 @@ function isTopmostDialog(z) {
         locale: NS,
         inject: () => actions()
       }, HeaderAction));
+      // Clickable agent-preset chip. Same id as DSH's read-only label at a lower
+      // priority: the slot core renders the lowest priority, so ours replaces the
+      // shipped label while this plugin is enabled and gives it back when not.
+      ctx.slots.inject("conversation.session.header.actions", () => ctx.slots.register({
+        name: "conversation.session.header.actions",
+        id: "agent-preset",
+        order: -10,
+        priority: -2,
+        locale: NS,
+        inject: () => actions()
+      }, SafeHeaderPresetChip));
       ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register({
         name: "sidebar.footer.action",
         id: "session-manager-footer",

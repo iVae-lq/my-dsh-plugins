@@ -198,15 +198,17 @@ test("issue #28: dialog flows stay intact and every dialog surface still portals
   const dialog = nodes(app.tree, node => node.type?.name === "ConfirmDialog" && node.props?.title === "删除会话")[0];
   assert.ok(dialog, "clicking the row delete button must still open the confirmation dialog");
 
-  // Source guard: the panel, the four dialog components and the row context menu must keep routing
-  // their surface through renderInOverlay(), i.e. nothing may go back to
-  // rendering a document-level surface inside its slot subtree.
+  // Source guard: the panel, the four dialog components, the row context menu
+  // and the header agent-preset menu must keep routing their surface through
+  // renderInOverlay(), i.e. nothing may go back to rendering a document-level
+  // surface inside its slot subtree.
   const source = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
   assert.equal(
     (source.match(/return renderInOverlay\(/g) || []).length,
-    5,
-    "the four dialog components and the row context menu must each portal their surface"
+    6,
+    "the four dialog components, the row context menu and the header preset menu must each portal their surface"
   );
+  assert.match(source, /function HeaderPresetMenu\(props\)[\s\S]*?return renderInOverlay\(menu\);/, "the header preset menu portals its surface");
   assert.match(
     source,
     /const panelModal = renderInOverlay\(h\("div", \{\s*\n\s*className: "sm-overlayLayer"/,

@@ -652,3 +652,98 @@ test("archive session fallback rejects when ctx.waterfall query throws an error 
   assert.match(res.data.result.items[0].error, /provider inspection timed out/);
   assert.deepEqual(f.state.archivedSessionIds, [], "must never swallow query exception and must not archive session");
 });
+
+/** A live session + live Agent whose preset can be switched without restarting DSH. */
+function liveSwitchFixture(f, { composed = "old", openTurnStartSeq = null, recomposeError } = {}) {
+  const appended = [];
+  const recomposed = [];
+  const state = { composed };
+  const agent = { id: "s1", ctx: { agentCtx: true }, status: "idle" };
+  const liveSession = {
+    id: "s1",
+    header: { id: "s1", cwd: f.source, agentPreset: "old" },
+    events: [],
+    append(type, data) { appended.push({ type, data }); },
+  };
+  f.live.set("s1", liveSession);
+  f.ctx.agents.get = id => (id === "s1" ? agent : undefined);
+  f.services.agentPresets = {
+    switches: new Map(),
+    list: async () => [{ id: "old" }, { id: "new" }],
+    composedPreset: c => (c === agent.ctx ? state.composed : undefined),
+    recompose: async (c, id) => {
+      if (recomposeError) throw recomposeError;
+      recomposed.push(id);
+      state.composed = id;
+      return { id };
+    },
+  };
+  f.services.sessionProjections = {
+    stateOf: (session, key) => (session === liveSession && key === "turnBoundary" ? { openTurnStartSeq, lastTurn: 2 } : undefined),
+  };
+  return { agent, liveSession, appended, recomposed, state };
+}
+
+test("live preset migration rebinds the running Agent at once (no restart) and records the choice", async t => {
+  const f = await fixture(t);
+  const staged = await f.stage({ events: [{ type: "agent-preset/selected", seq: 0, data: { agentPreset: "old" } }, { type: "user/message", seq: 1, data: { content: "keep history" } }] });
+  const live = liveSwitchFixture(f);
+  const response = await f.mount().request("/preset-migrate", { sessionId: "s1", toPreset: "new" });
+  assert.equal(response.status, 200, response.data.error);
+  assert.deepEqual(live.recomposed, ["new"], "the stale-coordinator path must rebind the live Agent too");
+  assert.equal(live.state.composed, "new");
+  assert.equal(response.data.result.appliedLive, true);
+  assert.ok(live.appended.some(e => e.type === "agent-preset/selected" && e.data.agentPreset === "new"));
+  const stored = await readSessionFile(staged.path);
+  assert.ok(stored.content.includes('"agentPreset":"new"'));
+  assert.ok(stored.content.includes("keep history"));
+  assert.equal(f.services.agentPresets.switches.size, 0, "switch queue drains");
+});
+
+test("live preset migration refuses while a turn is open, without touching disk or the Agent", async t => {
+  const f = await fixture(t);
+  const staged = await f.stage();
+  const live = liveSwitchFixture(f, { openTurnStartSeq: 7 });
+  const response = await f.mount().request("/preset-migrate", { sessionId: "s1", toPreset: "new" });
+  assert.equal(response.status, 409);
+  assert.equal(response.data.code, "session-busy");
+  assert.deepEqual(live.recomposed, []);
+  assert.deepEqual(live.appended, []);
+  assert.deepEqual(await fs.readFile(staged.path), staged.bytes);
+});
+
+test("a log that already names the target only rebinds the lagging live Agent, with no duplicate selection", async t => {
+  const f = await fixture(t);
+  const staged = await f.stage({ events: [{ type: "agent-preset/selected", seq: 0, data: { agentPreset: "new" } }] });
+  const live = liveSwitchFixture(f, { composed: "old" });
+  const response = await f.mount().request("/preset-migrate", { sessionId: "s1", toPreset: "new" });
+  assert.equal(response.status, 200, response.data.error);
+  assert.deepEqual(live.recomposed, ["new"]);
+  assert.equal(response.data.result.migrated, true);
+  assert.deepEqual(live.appended, []);
+  assert.deepEqual(await fs.readFile(staged.path), staged.bytes);
+});
+
+test("GET /presets returns display metadata without reading any session artifact", async t => {
+  const f = await fixture(t);
+  f.services.agentPresets = { list: async () => [{ id: "standard", order: 1 }, { id: "custom", name: "Mine", description: "d" }, { id: "bad", broken: "boom" }] };
+  f.persistence.readRaw = async () => { throw new Error("must not read sessions"); };
+  const response = await f.mount().request("/presets", undefined, "GET");
+  assert.equal(response.status, 200, response.data?.error);
+  assert.deepEqual(response.data.result.presets, [
+    { id: "standard", order: 1 },
+    { id: "custom", name: "Mine", description: "d" },
+    { id: "bad", broken: "boom" },
+  ]);
+});
+
+test("a failed live rebind surfaces as an error and leaves the session file untouched", async t => {
+  const f = await fixture(t);
+  const staged = await f.stage();
+  const live = liveSwitchFixture(f, { recomposeError: new Error("mount failed") });
+  const response = await f.mount().request("/preset-migrate", { sessionId: "s1", toPreset: "new" });
+  assert.equal(response.status, 500);
+  assert.match(response.data.error, /mount failed/);
+  assert.deepEqual(live.appended, []);
+  assert.deepEqual(await fs.readFile(staged.path), staged.bytes);
+});

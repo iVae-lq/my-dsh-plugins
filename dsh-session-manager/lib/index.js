@@ -1680,6 +1680,54 @@ ${rest}`, "utf8");
         return { sessionId, migrated: true, oldPreset, newPreset: toPreset };
       });
     };
+    /**
+     * Refuse a live switch while the session is mid-turn, so a running step
+     * never has its tool set swapped underneath it.
+     */
+    const assertPresetSwitchable = (liveSession, liveAgent) => {
+      const projections = ctx.get("sessionProjections");
+      let boundary;
+      try {
+        boundary = typeof projections?.stateOf === "function" ? projections.stateOf(liveSession, "turnBoundary") : void 0;
+      } catch { boundary = void 0; }
+      const turnOpen = boundary !== void 0 && boundary !== null
+        && boundary.openTurnStartSeq !== null && boundary.openTurnStartSeq !== void 0;
+      const agentRunning = liveAgent?.status === "running" || liveAgent?.busy === true;
+      if (turnOpen || agentRunning) {
+        const e = new Error("该会话的回合仍在运行，请等它结束（或先停止）后再切换预设。");
+        e.code = "session-busy";
+        throw e;
+      }
+    };
+    /**
+     * Serialize with DSH's own preset switches for the same Agent: the registry
+     * queues `select()` calls in its `switches` map, keyed by session id.
+     */
+    const ownPresetSwitches = new Map();
+    const withPresetSwitchLock = (presets, sessionId, operation) => {
+      const queues = presets?.switches instanceof Map ? presets.switches : ownPresetSwitches;
+      const run = (queues.get(sessionId) ?? Promise.resolve()).then(operation);
+      const guard = run.catch(() => void 0);
+      queues.set(sessionId, guard);
+      return run.finally(() => {
+        if (queues.get(sessionId) === guard) queues.delete(sessionId);
+      });
+    };
+    /**
+     * Rebind a live Agent to `toPreset` now, so the switch applies from the next
+     * message without restarting DSH. DSH's `agentPresets.select()` refuses once a
+     * session has started; `recompose()` is the primitive it uses, and only that
+     * "already started" check is skipped here. A failure propagates (nothing has
+     * been written yet) instead of silently leaving the old composition live.
+     * @returns true when the live Agent was rebound.
+     */
+    const recomposeLiveAgent = async (presets, liveAgent, toPreset) => {
+      if (liveAgent === void 0 || !liveAgent.ctx || typeof presets?.recompose !== "function") return false;
+      const composed = typeof presets.composedPreset === "function" ? presets.composedPreset(liveAgent.ctx) : void 0;
+      if (composed === toPreset) return false;
+      await presets.recompose(liveAgent.ctx, toPreset);
+      return true;
+    };
     /** Rewrite exactly one conversation's effective Agent preset. */
     const migratePreset = async (opts) => {
       const sessionId = typeof opts.sessionId === "string" ? opts.sessionId.trim() : "";
@@ -1708,6 +1756,10 @@ ${rest}`, "utf8");
       if (persistence === void 0) throw new Error("sessionPersistence service unavailable");
 
       if (liveSession !== void 0) {
+        assertPresetSwitchable(liveSession, liveAgent);
+        return await withPresetSwitchLock(presets, sessionId, async () => {
+        // Re-check inside the lock: a turn may have started while we waited.
+        assertPresetSwitchable(liveSession, liveAgent);
         const coordinator = persistence.coordinator;
         const states = coordinator?.states;
         const beforeState = states?.get?.(sessionId);
@@ -1725,10 +1777,13 @@ ${rest}`, "utf8");
         if (stateStale) {
           const raw = await readSessionArtifact(sessionId);
           if (raw !== void 0) {
+            // Rebind the running Agent first: if that fails nothing is written,
+            // and the disk rewrite below never claims a preset that is not live.
+            const recomposed = await recomposeLiveAgent(presets, liveAgent, toPreset);
             const result = await applyMigrationToArtifact({ sessionId, toPreset, liveSession });
             if (result.migrated) { try { ctx.emit("agent-preset/selected", sessionId, toPreset); } catch { /* best-effort */ } }
-            ctx.logger.info(`session-manager: migrated live preset for "${sessionId}" via cold path (state was stale, live cwd=${String(liveCwd)}, state cwd=${String(beforeState?.meta?.cwd)})`);
-            return { sessionId, migrated: true, oldPreset: result.oldPreset, newPreset: toPreset };
+            ctx.logger.info(`session-manager: migrated live preset for "${sessionId}" via cold path (state was stale, live cwd=${String(liveCwd)}, state cwd=${String(beforeState?.meta?.cwd)}, recomposed=${recomposed})`);
+            return { sessionId, migrated: result.migrated || recomposed, oldPreset: result.oldPreset, newPreset: toPreset, appliedLive: liveAgent !== void 0 };
           }
           // No artifact yet; fall through to the in-memory + flush path below,
           // which materializes the empty file using the live cwd.
@@ -1747,16 +1802,18 @@ ${rest}`, "utf8");
             break;
           }
         }
+        // The log may already name `toPreset` while the running Agent still uses
+        // the old composition (e.g. an earlier disk-only migration); rebinding
+        // covers that case without appending a duplicate selection.
+        const recomposed = await recomposeLiveAgent(presets, liveAgent, toPreset);
         if (oldPreset === toPreset) {
-          return { sessionId, migrated: false, oldPreset, newPreset: toPreset };
-        }
-        if (liveAgent !== void 0 && typeof presets?.recompose === "function" && liveAgent.ctx) {
-            try { await presets.recompose(liveAgent.ctx, toPreset); } catch { /* best-effort */ }
+          return { sessionId, migrated: recomposed, oldPreset, newPreset: toPreset, appliedLive: liveAgent !== void 0 };
         }
         liveSession.append("agent-preset/selected", { agentPreset: toPreset });
         await ctx.sessions.flush(liveSession);
-        ctx.logger.info(`session-manager: migrated live preset for "${sessionId}" from "${String(oldPreset)}" to "${toPreset}"`);
-        return { sessionId, migrated: true, oldPreset, newPreset: toPreset };
+        ctx.logger.info(`session-manager: migrated live preset for "${sessionId}" from "${String(oldPreset)}" to "${toPreset}" (recomposed=${recomposed})`);
+        return { sessionId, migrated: true, oldPreset, newPreset: toPreset, appliedLive: liveAgent !== void 0 };
+        });
       }
 
       // A session absent from SessionStore is cold. If an older plugin left its
@@ -2593,6 +2650,27 @@ ${rest}`, "utf8");
           const retainSessionIds = body.retainSessionIds === true;
           const record = await workspaceArchives().setUnarchive(workspaceId, { pending, retainSessionIds });
           return send(res, 200, { ok: true, result: { workspaceId, record } });
+        }
+        if (req.method === "GET" && path === "/presets") {
+          // Lightweight roster for the header preset chip: display metadata only,
+          // no session artifact reads (unlike /preset-scan).
+          const presets = ctx.get("agentPresets");
+          if (presets === void 0 || typeof presets.list !== "function") {
+            return send(res, 503, { ok: false, error: "agentPresets service unavailable" });
+          }
+          const roster = (await presets.list()) || [];
+          return send(res, 200, {
+            ok: true,
+            result: {
+              presets: roster.filter((row) => row && typeof row.id === "string").map((row) => ({
+                id: row.id,
+                ...(typeof row.name === "string" ? { name: row.name } : {}),
+                ...(typeof row.description === "string" ? { description: row.description } : {}),
+                ...(typeof row.order === "number" ? { order: row.order } : {}),
+                ...(row.broken !== void 0 ? { broken: String(row.broken) } : {})
+              }))
+            }
+          });
         }
         if (req.method === "GET" && path === "/workspace-archives") {
           let archives = {};
@@ -3533,6 +3611,7 @@ ${rest}`, "utf8");
         const status = error?.code === "bad-request" ? 400 : error?.code === "body-too-large" ? 413
           : error?.code === "annotation-conflict" || error?.code === "annotations-busy" ? 409
           : error?.code === "working-directory-sync-unsafe" ? 409
+          : error?.code === "session-busy" ? 409
           : error?.code === "session-not-found" ? 404 : error?.code?.startsWith("annotations-") ? 503
           : error?.code === "workspace-membership-conflict" ? 409
           : error?.code === "workspace-attach-unavailable" ? 501 : 500;

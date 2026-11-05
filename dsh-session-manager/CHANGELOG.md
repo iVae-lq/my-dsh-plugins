@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- **feat(preset)**: "Migrate preset" now switches a running session live. The stale-coordinator branch used to rewrite only the artifact and leave the running Agent on its old composition until DSH restarted; both live branches now rebind the Agent with `agentPresets.recompose()` before writing, serialize with DSH's own preset switches, refuse with `409 session-busy` while a turn is running, surface a failed rebind instead of swallowing it, and rebind an Agent that lags behind a log already naming the target. Responses report `appliedLive`.
+- **feat(ui)**: The session header's agent-preset label is clickable. A chip registered at the shipped label's slot id (`agent-preset`, lower priority) opens a preset menu and switches through the same `/preset-migrate` path as the panel; disabling the plugin restores the shipped label. The menu is portaled to the overlay root and joins the dialog-surface rules, so the "Dialog opacity" slider and the frosted-glass blur apply to it.
+- **feat(ui)**: Preset pickers show each preset's localized name, its id and its description instead of a bare id: the header menu, the panel's "Migrate preset" dialog (radio list with a "Current" badge, replacing the id `<select>`) and bulk "Migrate preset". Presets that failed to load are disabled with the reason; a current preset that no longer exists is flagged. Hosts without `/presets` fall back to the scanned ids.
+- **feat(api)**: `GET /presets` returns preset display metadata without reading session artifacts.
+- **test**: Live rebind, busy refusal, lagging-Agent rebind, failed-rebind safety, `/presets`, the header chip and menu surface, and the preset choice lists (`client-header-preset-switch.test.mjs`).
+
 ## 0.7.5 — 2026-10-22
 
 - **fix(security)**: Enforce centralized API authentication on all `/session-manager/api/*` routes using DSH official `ctx.connection.admit(req)`. Enforce strict Owner-only authorization (`peer.principal.kind === "owner"`), reject untrusted, unauthenticated, empty, or non-owner requests before body reading and database queries, and fail closed with HTTP 503 (`auth-unavailable`) if connection service is missing or unready, preventing unauthorized access across public tunnels, reverse proxies, and local networks (#43).

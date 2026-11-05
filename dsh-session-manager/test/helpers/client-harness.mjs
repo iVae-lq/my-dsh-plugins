@@ -28,7 +28,7 @@ const clipboardStub = { writes: [], writeText(text) { this.writes.push(text); re
 /** Real, unmodified client bundle and registered slots, with a small hook host
  * to keep CI dependency-free. Tests exercise rendered controls, shared-store
  * subscriptions, async responses and the actual annotation editor. */
-export function mountClient({ sessions = [], current = "", archivedIds = [], workspaces = [], language = "zh", sessionCreatedAt = {}, fetchWorkspaces, sessionAnnotations = {}, fetchAnnotations, saveAnnotations, fetchUpdateCheck, fetchUpdateInstall, fetchUpdateStatus, fetchNpmLatest, fetchPresetScan, fetchDeletePreview, confirm = () => true, wide = true, initialStorage = {}, innerWidth = 1200, innerHeight = 768, querySelector: customQuerySelector } = {}) {
+export function mountClient({ sessions = [], current = "", archivedIds = [], workspaces = [], language = "zh", sessionCreatedAt = {}, fetchWorkspaces, sessionAnnotations = {}, fetchAnnotations, saveAnnotations, fetchUpdateCheck, fetchUpdateInstall, fetchUpdateStatus, fetchNpmLatest, fetchPresetScan, fetchPresets, migratePreset, fetchDeletePreview, confirm = () => true, wide = true, initialStorage = {}, innerWidth = 1200, innerHeight = 768, querySelector: customQuerySelector } = {}) {
   // Fresh clipboard stub per mount so each test sees only its own writes.
   clipboardStub.writes.length = 0;
   let list = { ids: sessions.map(s => s.id), byId: Object.fromEntries(sessions.map(s => [s.id, s])), current };
@@ -343,6 +343,14 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
             availablePresets: ["PresetA", "PresetB", "PresetC"]
           }
         };
+      } else if (url === "/session-manager/api/presets") {
+        data = fetchPresets ? await fetchPresets(options, url) : {
+          ok: true,
+          result: { presets: [{ id: "standard", order: 1 }, { id: "cordis", order: 4 }, { id: "custom", name: "My preset", description: "Hand-made" }, { id: "bad", broken: "boom" }] }
+        };
+      } else if (url === "/session-manager/api/preset-migrate") {
+        const body = options?.body ? JSON.parse(options.body) : {};
+        data = migratePreset ? await migratePreset(body) : { ok: true, result: { sessionId: body.sessionId, migrated: true, newPreset: body.toPreset, appliedLive: true } };
       } else if (url === "/session-manager/api/workspace-archive") {
         const body = options?.body ? JSON.parse(options.body) : {};
         data = { ok: true, result: body };
