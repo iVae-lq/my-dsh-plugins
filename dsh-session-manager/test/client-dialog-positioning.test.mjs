@@ -45,7 +45,7 @@ test("secondary dialog positioning: horizontally and vertically centered relativ
 
   // Open delete confirm dialog
   const row = nodes(app.tree, node => node.props?.["data-session-id"] === "s1")[0];
-  const deleteBtn = nodes(row, node => node.type === "button" && text(node) === "删除会话")[0];
+  const deleteBtn = app.rowButton("s1", "删除会话");
   assert.ok(deleteBtn, "delete button must exist");
   deleteBtn.props.onClick();
   await app.flush();
@@ -102,7 +102,7 @@ test("secondary dialog positioning: tracks movement when session management pane
   await app.flush();
 
   const row = nodes(app.tree, node => node.props?.["data-session-id"] === "s1")[0];
-  const deleteBtn = nodes(row, node => node.type === "button" && text(node) === "删除会话")[0];
+  const deleteBtn = app.rowButton("s1", "删除会话");
   deleteBtn.props.onClick();
   await app.flush();
 
@@ -152,7 +152,7 @@ test("secondary dialog positioning: clamps within viewport to preserve minimum 1
   await app.flush();
 
   const row = nodes(app.tree, node => node.props?.["data-session-id"] === "s1")[0];
-  const deleteBtn = nodes(row, node => node.type === "button" && text(node) === "删除会话")[0];
+  const deleteBtn = app.rowButton("s1", "删除会话");
   deleteBtn.props.onClick();
   await app.flush();
 
@@ -192,7 +192,7 @@ test("secondary dialog positioning: MoveDialog, MigratePresetDialog, and Annotat
   const row = nodes(app.tree, node => node.props?.["data-session-id"] === "s1")[0];
 
   // 1. MoveDialog (360x320)
-  const moveBtn = nodes(row, node => node.type === "button" && text(node) === "移动至工作区")[0];
+  const moveBtn = app.rowButton("s1", "移动至工作区");
   assert.ok(moveBtn, "move button must exist");
   moveBtn.props.onClick();
   await app.flush();
@@ -237,7 +237,7 @@ test("secondary dialog positioning: MoveDialog, MigratePresetDialog, and Annotat
 
   // 2. MigratePresetDialog (360x320)
   const freshRow = nodes(app.tree, node => node.props?.["data-session-id"] === "s1")[0];
-  const migrateBtn = nodes(freshRow, node => node.type === "button" && text(node) === "迁移预设")[0];
+  const migrateBtn = app.rowButton("s1", "迁移预设");
   assert.ok(migrateBtn, "migrate button must exist");
   migrateBtn.props.onClick();
   await app.flush();
@@ -438,7 +438,7 @@ test("unified first line text formatting across single and bulk dialogs", async 
 
   // 1. Single Delete dialog first line
   const row = nodes(app.tree, node => node.props?.["data-session-id"] === "s1")[0];
-  const deleteBtn = nodes(row, node => node.type === "button" && text(node) === "删除会话")[0];
+  const deleteBtn = app.rowButton("s1", "删除会话");
   deleteBtn.props.onClick();
   await app.flush();
   let confirmDialogEl = nodes(app.tree, node => node.type?.name === "ConfirmDialog" && node.props?.open)[0];
@@ -450,7 +450,7 @@ test("unified first line text formatting across single and bulk dialogs", async 
   assert.equal(text(warn), "删除操作不可撤销，请确认后再继续。");
 
   // 2. Single Move dialog first line
-  const moveBtn = nodes(row, node => node.type === "button" && text(node) === "移动至工作区")[0];
+  const moveBtn = app.rowButton("s1", "移动至工作区");
   moveBtn.props.onClick();
   await app.flush();
   let moveDialogEl = nodes(app.tree, node => node.type?.name === "MoveDialog" && node.props?.open)[0];
@@ -460,7 +460,7 @@ test("unified first line text formatting across single and bulk dialogs", async 
   assert.equal(nodes(host.tree, n => n.props?.className === "sm-moveLabel").length, 0, "MoveDialog should not render extra sm-moveLabel above select");
 
   // 3. Single Migrate dialog first line
-  const migrateBtn = nodes(row, node => node.type === "button" && text(node) === "迁移预设")[0];
+  const migrateBtn = app.rowButton("s1", "迁移预设");
   migrateBtn.props.onClick();
   await app.flush();
   let migrateDialogEl = nodes(app.tree, node => node.type?.name === "MigratePresetDialog" && node.props?.open)[0];

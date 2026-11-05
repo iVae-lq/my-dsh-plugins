@@ -95,6 +95,61 @@ test("dialog opacity: resetDialogOpacity restores 100%", () => {
 });
 
 // =========================================================================
+// 1b. Frosted glass: switch + blur strength
+// =========================================================================
+
+test("frosted glass: defaults to on at 24px and publishes the blur variable on load", () => {
+  const harness = mountClient();
+  const { updateStore } = harness.exports;
+  assert.equal(updateStore.getGlassEnabled(), true);
+  assert.equal(updateStore.getGlassBlur(), 24);
+  assert.equal(harness.rootStyleValues.get("--sm-glass-blur"), "24px");
+  harness.dispose();
+});
+
+test("frosted glass: switch and blur persist, are clamped to 0..64 and snap to 2px", () => {
+  const harness = mountClient();
+  const { updateStore } = harness.exports;
+  assert.equal(updateStore.setGlassBlur(40), 40);
+  assert.equal(harness.rootStyleValues.get("--sm-glass-blur"), "40px");
+  assert.equal(updateStore.setGlassBlur(999), 64);
+  assert.equal(updateStore.setGlassBlur(-5), 0);
+  assert.equal(updateStore.setGlassBlur(13), 14);
+  assert.equal(updateStore.setGlassEnabled(false), false);
+  assert.equal(updateStore.getGlassEnabled(), false);
+  updateStore.resetGlass();
+  assert.equal(updateStore.getGlassEnabled(), true);
+  assert.equal(updateStore.getGlassBlur(), 24);
+  harness.dispose();
+});
+
+test("frosted glass: a stored preference is restored on load", () => {
+  const harness = mountClient({ initialStorage: { "dsh-session-manager-glass-blur": "30", "dsh-session-manager-glass-enabled": "0" } });
+  const { updateStore } = harness.exports;
+  assert.equal(updateStore.getGlassBlur(), 30);
+  assert.equal(updateStore.getGlassEnabled(), false);
+  assert.equal(harness.rootStyleValues.get("--sm-glass-blur"), "30px");
+  harness.dispose();
+});
+
+test("frosted glass: the settings card exposes a switch and a 0..64 blur slider", () => {
+  const harness = mountClient();
+  const { SessionManagerSettingsCard } = harness.exports;
+  const host = harness.mountComponent(SessionManagerSettingsCard, { t: harness.t });
+  const toggle = nodes(host.tree, node => node.type === "input" && node.props?.type === "checkbox")
+    .find(node => node.props?.["aria-label"] === harness.t("settings.glass"));
+  const slider = nodes(host.tree, node => node.type === "input" && node.props?.type === "range")
+    .find(node => node.props?.["aria-label"] === harness.t("settings.glassBlur"));
+  assert.ok(toggle, "glass switch must be present");
+  assert.ok(slider, "blur slider must be present");
+  assert.equal(slider.props.min, 0);
+  assert.equal(slider.props.max, 64);
+  assert.equal(slider.props.step, 2);
+  assert.equal(slider.props.value, 24);
+  host.dispose();
+  harness.dispose();
+});
+// =========================================================================
 // 2. Settings card UI
 // =========================================================================
 

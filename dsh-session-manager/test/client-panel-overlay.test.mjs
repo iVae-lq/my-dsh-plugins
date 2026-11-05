@@ -191,21 +191,21 @@ test("issue #28: dialog flows stay intact and every dialog surface still portals
   // harness stub), so assert on the element's props the way
   // client-delete-navigation.test.mjs does.
   const row = nodes(app.tree, node => node.props?.["data-session-id"] === "s1")[0];
-  const deleteButton = nodes(row, node => node.type === "button" && text(node) === "删除会话")[0];
+  const deleteButton = app.rowButton("s1", "删除会话");
   assert.ok(deleteButton, "the row must expose its delete button");
   deleteButton.props.onClick();
   await app.flush();
   const dialog = nodes(app.tree, node => node.type?.name === "ConfirmDialog" && node.props?.title === "删除会话")[0];
   assert.ok(dialog, "clicking the row delete button must still open the confirmation dialog");
 
-  // Source guard: the panel and all four dialog components must keep routing
+  // Source guard: the panel, the four dialog components and the row context menu must keep routing
   // their surface through renderInOverlay(), i.e. nothing may go back to
   // rendering a document-level surface inside its slot subtree.
   const source = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
   assert.equal(
     (source.match(/return renderInOverlay\(/g) || []).length,
-    4,
-    "the four dialog components must each portal their surface"
+    5,
+    "the four dialog components and the row context menu must each portal their surface"
   );
   assert.match(
     source,

@@ -22,7 +22,7 @@ test("favorite/review shortcuts synchronize between panel and header and only pa
   assert.equal(app.annotations.a.priority, 2);
   assert.equal(app.headerControl("取消收藏: Alpha").props["aria-pressed"], true);
   await app.clickHeader("标记待回看: Alpha");
-  assert.equal(app.control("取消待回看: Alpha").props["aria-pressed"], true);
+  assert.equal(app.control("取消待回看: Alpha").props["aria-checked"], true);
   const posted = app.requests.filter(r => r.options?.method === "POST").map(r => JSON.parse(r.options.body).patch);
   assert.deepEqual(posted, [{ favorite: true }, { reviewLater: true }]);
   assert.deepEqual(app.sourceIds, ["a", "b", "c"]);
@@ -139,7 +139,7 @@ test("annotation loading errors disable only annotation actions; retry restores 
 test("focus reload picks up changes from another browser without altering session data", async t => {
   const app = await setup(t);
   app.setAnnotations({ a: { favorite: true, tags: ["remote"], revision: 4 } }); await app.focus();
-  assert.equal(app.control("取消收藏: Alpha").props["aria-pressed"], true);
+  assert.equal(app.control("取消收藏: Alpha").props["aria-checked"], true);
   assert.ok(text(app.tree).includes("remote")); assert.deepEqual(app.sourceIds, ["a", "b", "c"]);
 });
 
@@ -151,7 +151,7 @@ test("pending quick actions disable both surfaces and duplicate requests are pre
   assert.equal(app.headerControl("收藏会话: Alpha").props.disabled, true);
   assert.equal(app.control("收藏会话: Alpha").props.disabled, true);
   release(); await app.flush();
-  assert.equal(app.control("取消收藏: Alpha").props["aria-pressed"], true);
+  assert.equal(app.control("取消收藏: Alpha").props["aria-checked"], true);
   assert.equal(app.requests.filter(r => r.options?.method === "POST").length, 1);
 });
 

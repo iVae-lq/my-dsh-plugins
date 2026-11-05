@@ -50,7 +50,7 @@ test("delete navigation: deleting current session from panel row calls uiWorkspa
   // Find row delete button for s1
   const s1Row = nodes(app.tree, n => n.props?.["data-session-id"] === "s1")[0];
   assert.ok(s1Row, "s1 row must exist");
-  const deleteBtn = nodes(s1Row, n => n.type === "button" && text(n) === "删除会话")[0];
+  const deleteBtn = app.rowButton("s1", "删除会话");
   assert.ok(deleteBtn, "Row delete button must exist");
 
   deleteBtn.props.onClick();
@@ -84,7 +84,7 @@ test("delete navigation: deleting a non-current session does NOT call uiWorkspac
   // Find row delete button for s2 (non-current)
   const s2Row = nodes(app.tree, n => n.props?.["data-session-id"] === "s2")[0];
   assert.ok(s2Row, "s2 row must exist");
-  const deleteBtn = nodes(s2Row, n => n.type === "button" && text(n) === "删除会话")[0];
+  const deleteBtn = app.rowButton("s2", "删除会话");
   assert.ok(deleteBtn, "Row delete button must exist");
 
   deleteBtn.props.onClick();

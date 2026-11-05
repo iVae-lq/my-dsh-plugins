@@ -202,30 +202,20 @@ test("display-name-only: HeaderAction resolves the friendly displayTitle at rend
   );
 });
 
-test("issue #17.4: row Open button unarchives archived sessions before opening (issue #17.4)", () => {
-  const rowOpenAnchor = 'h("button", { type: "button", className: "sm-rowBtn", disabled: busy, onClick:';
-  let pos = 0;
-  const rowOpenHandlers = [];
-  while (true) {
-    const next = SRC.indexOf(rowOpenAnchor, pos);
-    if (next < 0) break;
-    const tail = SRC.indexOf("t(\"row.open\")", next);
-    if (tail < 0) break;
-    const end = SRC.indexOf(")", tail) + 1;
-    rowOpenHandlers.push(SRC.slice(next, end));
-    pos = end;
-  }
-  assert.ok(rowOpenHandlers.length > 0, "expected at least one rowBtn onClick handler");
-  const openHandler = rowOpenHandlers.find((s) => s.includes("onOpen(s.id)"));
-  assert.ok(openHandler, "expected a row Open handler that calls onOpen(s.id)");
+test("issue #17.4: opening a row unarchives archived sessions before opening (issue #17.4)", () => {
+  // Rows open on left click now (no Open button); the shared handler is openRow.
+  const start = SRC.indexOf("const openRow = (e) => {");
+  assert.ok(start >= 0, "expected the row open handler (openRow)");
+  const openHandler = SRC.slice(start, SRC.indexOf("const openCtx", start));
+  assert.ok(openHandler.includes("onOpen(s.id)"), "expected a row open handler that calls onOpen(s.id)");
   assert.match(
     openHandler,
     /if\s*\(\s*isArchived\s*\)/,
-    "row Open handler must guard with isArchived (issue #17.4)"
+    "row open handler must guard with isArchived (issue #17.4)"
   );
   assert.match(
     openHandler,
     /onUnarchive\(s\.id\)/,
-    "row Open handler must call onUnarchive(s.id) before onOpen(s.id) for archived rows"
+    "row open handler must call onUnarchive(s.id) before onOpen(s.id) for archived rows"
   );
 });

@@ -223,6 +223,12 @@ function isTopmostDialog(z) {
       "settings.dialogOpacity.hint": "仅调整插件弹窗的背景透明度",
       "settings.dialogOpacity.value": "{value}%",
       "settings.dialogOpacity.reset": "恢复默认",
+      "settings.glass": "毛玻璃效果",
+      "settings.glass.hint": "背景半透明时，对弹窗和会话管理页后方的内容做模糊",
+      "settings.glass.enable": "启用",
+      "settings.glassBlur": "模糊强度",
+      "settings.glassBlur.hint": "0–64 px，仅在透明度低于 100% 且启用毛玻璃时生效",
+      "settings.glassBlur.value": "{value}px",
       "settings.projectSection": "项目",
       "settings.github": "GitHub 仓库",
       "settings.star": "感谢Star",
@@ -519,6 +525,12 @@ function isTopmostDialog(z) {
       "settings.dialogOpacity.hint": "Adjusts dialog background opacity only",
       "settings.dialogOpacity.value": "{value}%",
       "settings.dialogOpacity.reset": "Reset to default",
+      "settings.glass": "Frosted glass",
+      "settings.glass.hint": "Blur whatever is behind dialogs and the session manager page when the background is translucent",
+      "settings.glass.enable": "Enabled",
+      "settings.glassBlur": "Blur strength",
+      "settings.glassBlur.hint": "0–64 px; applies only when opacity is below 100% and frosted glass is on",
+      "settings.glassBlur.value": "{value}px",
       "settings.projectSection": "Project",
       "settings.github": "GitHub Repository",
       "settings.star": "Star on GitHub",
@@ -954,48 +966,68 @@ function isTopmostDialog(z) {
       // ── Home-page layout (OpenCode style): full-window page below the title bar,
       // search on top, project list on the left, time-grouped sessions on the right.
       // Scoped to .sm-ocPanel so the annotation surface (also .sm-panelDialog) is untouched.
-      "html[data-sm-translucent] .sm-nativeDialog,html[data-sm-translucent] .sm-panelDialog,html[data-sm-translucent] .sm-migrateDialog,html[data-sm-translucent] .sm-settingsCard{-webkit-backdrop-filter:blur(24px) saturate(1.15);backdrop-filter:blur(24px) saturate(1.15)}",
-      ".sm-panelDialog.sm-ocPanel{--sm-dialog-surface:var(--dsw-alias-bg-base,var(--dsw-alias-bg-layer-1,#1f1f23));position:fixed!important;inset:var(--dsh-windows-titlebar-height,0px) 0 0 0!important;margin:0!important;width:auto!important;height:auto!important;max-width:none!important;max-height:none!important;border:0!important;border-radius:0!important;box-shadow:none!important}",
+      // Every fill inside the page is a translucent neutral (--sm-oc-fill*) rather than an
+      // opaque theme layer, so controls blend with any dialog opacity / glass setting.
+      "html[data-sm-translucent] .sm-nativeDialog,html[data-sm-translucent] .sm-panelDialog,html[data-sm-translucent] .sm-migrateDialog,html[data-sm-translucent] .sm-settingsCard{-webkit-backdrop-filter:blur(var(--sm-glass-blur,24px)) saturate(1.15);backdrop-filter:blur(var(--sm-glass-blur,24px)) saturate(1.15)}",
+      ".sm-panelDialog.sm-ocPanel{--sm-dialog-surface:var(--dsw-alias-bg-base,var(--dsw-alias-bg-layer-1,#1f1f23));--sm-oc-fill:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 6%,transparent);--sm-oc-fill-hover:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 10%,transparent);--sm-oc-fill-active:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 15%,transparent);--sm-oc-line:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 14%,transparent);position:fixed!important;inset:var(--dsh-windows-titlebar-height,0px) 0 0 0!important;margin:0!important;width:auto!important;height:auto!important;max-width:none!important;max-height:none!important;border:0!important;border-radius:0!important;box-shadow:none!important}",
       "html[data-windows-titlebar] .sm-panelDialog.sm-ocPanel{border-radius:14px 14px 0 0!important}",
-      ".sm-panelDialog.sm-ocPanel .sm-nativeDialogHeader{border-bottom:0!important;min-height:40px!important;padding:6px 14px!important;background:transparent}",
+      ".sm-panelDialog.sm-ocPanel .sm-nativeDialogHeader{border-bottom:0!important;min-height:44px!important;padding:6px 14px!important;background:transparent}",
+      ".sm-ocPanel .sm-panelHeaderClose{border:0;background:transparent;color:var(--dsw-alias-label-secondary)}.sm-ocPanel .sm-panelHeaderClose:hover:not(:disabled),.sm-ocPanel .sm-panelHeaderGithub:hover,.sm-ocPanel .sm-panelHeaderWhale:hover{background:var(--sm-oc-fill-hover)}",
+      ".sm-ocPanel .sm-panelNav{background:var(--sm-oc-fill);border:0;border-radius:9px;padding:2px}.sm-ocPanel .sm-panelNavTab{border-radius:7px;font-weight:500}.sm-ocPanel .sm-panelNavTab.sm-on{background:var(--sm-oc-fill-active);box-shadow:none;font-weight:500}",
       ".sm-panelDialog.sm-ocPanel .sm-panel{display:flex;flex-direction:column;gap:0!important;padding:0!important;min-width:0!important;min-height:0;max-height:none!important;overflow:hidden!important;flex:1 1 auto}",
-      ".sm-ocWrap{box-sizing:border-box;width:100%;max-width:1060px;height:100%;min-height:0;margin:0 auto;padding:24px 32px 0;display:grid;grid-template-columns:240px minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr);column-gap:48px}",
+      ".sm-ocWrap{box-sizing:border-box;width:100%;max-width:1060px;height:100%;min-height:0;margin:0 auto;padding:20px 32px 0;display:grid;grid-template-columns:232px minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr);column-gap:48px}",
       ".sm-ocNarrow{box-sizing:border-box;width:100%;max-width:880px;height:100%;min-height:0;margin:0 auto;padding:16px 32px 0;display:flex;flex-direction:column}",
       ".sm-ocNarrow .sm-list{flex:1 1 auto;min-height:0}",
-      ".sm-ocSearch{grid-column:2;grid-row:1;position:relative;display:flex;align-items:center;margin-bottom:28px}",
+      ".sm-ocSearch{grid-column:2;grid-row:1;position:relative;display:flex;align-items:center;margin-bottom:24px}",
       ".sm-ocSearch svg{position:absolute;left:12px;color:var(--dsw-alias-label-tertiary);pointer-events:none}",
-      ".sm-ocSearch .sm-queryInput{height:36px;padding:0 12px 0 36px;border:0!important;border-radius:8px;background:var(--dsw-alias-bg-layer-2,rgba(128,128,128,.12));font-size:13px}",
-      ".sm-ocSide{grid-column:1;grid-row:2 / 4;min-height:0;min-width:0;display:flex;flex-direction:column;overflow:auto;scrollbar-width:thin}",
-      ".sm-ocSideHead{display:flex;align-items:center;justify-content:space-between;flex:none;height:28px;margin-bottom:8px;padding:0 2px;color:var(--dsw-alias-label-secondary);font-size:13px}",
-      ".sm-ocIconBtn,.sm-ocNew{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;border-radius:6px;font:inherit;font-size:13px;line-height:18px;transition:background .12s,color .12s}",
-      ".sm-ocIconBtn{width:28px;height:28px;padding:0}.sm-ocNew{height:28px;padding:0 8px}",
-      ".sm-ocIconBtn:hover,.sm-ocNew:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.sm-ocNew:disabled{opacity:.5;cursor:not-allowed}",
-      ".sm-ocProjects{display:flex;flex-direction:column;gap:4px;min-width:0}",
-      ".sm-ocProjectItem{display:flex;align-items:center;gap:10px;min-width:0;height:32px;padding:0 6px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:18px;text-align:left;cursor:pointer;transition:background .12s}",
-      ".sm-ocProjectItem:hover{background:var(--dsw-alias-interactive-bg-hover)}.sm-ocProjectItem.sm-on{background:var(--dsw-alias-bg-module-platform,var(--dsw-alias-interactive-bg-hover))}",
+      ".sm-ocPanel .sm-ocSearch .sm-queryInput{height:36px;padding:0 12px 0 36px;border:0!important;border-radius:9px;background:var(--sm-oc-fill);font-size:13px}.sm-ocPanel .sm-ocSearch .sm-queryInput:hover{background:var(--sm-oc-fill-hover)}.sm-ocPanel .sm-ocSearch .sm-queryInput:focus-visible{outline:1.5px solid color-mix(in srgb,var(--dsw-alias-label-primary,#888) 35%,transparent)!important;outline-offset:0!important;background:var(--sm-oc-fill-hover)}",
+      ".sm-ocSide{grid-column:1;grid-row:2 / 4;min-height:0;min-width:0;display:flex;flex-direction:column;overflow:auto}",
+      ".sm-ocSideHead{display:flex;align-items:center;justify-content:space-between;flex:none;height:28px;margin-bottom:6px;padding:0 6px;color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:500}",
+      ".sm-ocIconBtn,.sm-ocNew{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;border-radius:7px;font:inherit;font-size:13px;line-height:18px;transition:background .12s,color .12s}",
+      ".sm-ocIconBtn{width:28px;height:28px;padding:0}.sm-ocNew{height:28px;padding:0 10px}",
+      ".sm-ocIconBtn:hover,.sm-ocNew:hover:not(:disabled){background:var(--sm-oc-fill-hover);color:var(--dsw-alias-label-primary)}.sm-ocNew:disabled{opacity:.5;cursor:not-allowed}",
+      ".sm-ocProjects{display:flex;flex-direction:column;gap:2px;min-width:0;padding-bottom:16px}",
+      ".sm-ocProjectItem{display:flex;align-items:center;gap:10px;min-width:0;height:32px;padding:0 8px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;line-height:18px;text-align:left;cursor:pointer;transition:background .12s,color .12s}",
+      ".sm-ocProjectItem:hover{background:var(--sm-oc-fill);color:var(--dsw-alias-label-primary)}.sm-ocProjectItem.sm-on{background:var(--sm-oc-fill-active);color:var(--dsw-alias-label-primary)}.sm-ocProjectItem:focus-visible{outline:1.5px solid color-mix(in srgb,var(--dsw-alias-label-primary,#888) 35%,transparent);outline-offset:-1.5px}",
       ".sm-ocProjectName{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-      ".sm-ocBadge{flex:none;width:16px;height:16px;border-radius:4px;display:inline-grid;place-items:center;background:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 38%,var(--dsw-alias-bg-base,#222));color:var(--dsw-alias-bg-base,#fff);font-size:10px;font-weight:700;line-height:1;text-transform:uppercase}",
-      ".sm-ocBadgeAll{background:transparent;color:var(--dsw-alias-label-secondary)}",
+      ".sm-ocBadge{flex:none;width:16px;height:16px;border-radius:4px;display:inline-grid;place-items:center;background:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 34%,transparent);color:var(--dsw-alias-label-primary,#fff);font-size:10px;font-weight:700;line-height:1;text-transform:uppercase}",
+      ".sm-ocProjectItem.sm-on .sm-ocBadge{background:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 52%,transparent)}",
       ".sm-ocMainHead{grid-column:2;grid-row:2;display:flex;justify-content:flex-end;align-items:center;height:28px;margin-bottom:8px}",
       ".sm-ocMainBody{grid-column:2;grid-row:3;min-height:0;min-width:0;display:flex;flex-direction:column}",
       ".sm-ocMainBody .sm-panelTools{padding:0 0 6px;gap:6px}",
       ".sm-ocPanel .sm-panelSelects{grid-template-columns:repeat(3,minmax(0,1fr))}.sm-ocPanel .sm-ocWsField{display:none}",
+      ".sm-ocPanel .sm-viewSelect{border:0!important;border-radius:8px!important;background-color:var(--sm-oc-fill)!important}.sm-ocPanel .sm-viewSelect:hover:not(:disabled){background-color:var(--sm-oc-fill-hover)!important}",
+      ".sm-ocPanel .sm-filterBtn{border:0;border-radius:7px;background:transparent;color:var(--dsw-alias-label-secondary);padding:3px 10px}.sm-ocPanel .sm-filterBtn:hover:not(:disabled){background:var(--sm-oc-fill-hover);color:var(--dsw-alias-label-primary)}.sm-ocPanel .sm-filterBtn.sm-on{background:var(--sm-oc-fill-active);color:var(--dsw-alias-label-primary)}",
+      ".sm-ocPanel .sm-bulkBar{border:0;border-radius:10px;background:var(--sm-oc-fill)}.sm-ocPanel .sm-bulkBar .sm-bulkBtn{border:0;background:transparent}.sm-ocPanel .sm-bulkBar .sm-bulkBtn:hover:not(:disabled){background:var(--sm-oc-fill-hover)}",
+      ".sm-ocPanel .sm-resultSummary{padding:0 2px}",
       ".sm-ocPanel .sm-ocList{flex:1 1 auto;min-height:0;gap:0;padding-bottom:24px;overflow:auto}",
-      ".sm-ocGroup{flex:none;padding:18px 8px 8px;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:18px}.sm-ocGroup:first-child{padding-top:8px}",
-      ".sm-panelDialog.sm-ocPanel .sm-row{position:relative;min-height:41px;padding:0 8px;gap:10px;border:0;border-radius:8px;align-items:center;background:transparent}",
-      ".sm-panelDialog.sm-ocPanel .sm-row:hover,.sm-panelDialog.sm-ocPanel .sm-row:focus-within{background:var(--dsw-alias-interactive-bg-hover)}",
-      ".sm-panelDialog.sm-ocPanel .sm-row.sm-rowCurrent{background:var(--dsw-alias-bg-module-platform,var(--dsw-alias-interactive-bg-hover))}",
+      ".sm-ocGroup{flex:none;padding:16px 10px 6px;color:var(--dsw-alias-label-tertiary);font-size:12px;font-weight:500;line-height:18px}.sm-ocGroup:first-child{padding-top:6px}",
+      ".sm-panelDialog.sm-ocPanel .sm-row{position:relative;min-height:40px;padding:0 10px;gap:10px;border:0;border-radius:9px;align-items:center;background:transparent;cursor:pointer;user-select:none;-webkit-user-select:none;outline:none}",
+      ".sm-panelDialog.sm-ocPanel .sm-row:hover{background:var(--sm-oc-fill-hover)}.sm-panelDialog.sm-ocPanel .sm-row:focus-visible{background:var(--sm-oc-fill-hover);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--dsw-alias-label-primary,#888) 35%,transparent)}",
+      ".sm-panelDialog.sm-ocPanel .sm-row.sm-rowCurrent{background:var(--sm-oc-fill)}.sm-panelDialog.sm-ocPanel .sm-row.sm-rowCurrent:hover{background:var(--sm-oc-fill-hover)}.sm-panelDialog.sm-ocPanel .sm-row.sm-rowBulkSelected{background:var(--sm-oc-fill-active)}",
+      ".sm-ocPanel .sm-row.sm-rowBusy{opacity:.55;pointer-events:none}",
       ".sm-panelDialog.sm-ocPanel .sm-rowMain{flex:1 1 auto;flex-direction:row;align-items:center;gap:10px;min-width:0}",
       ".sm-ocPanel .sm-rowTitle{flex:0 1 auto;min-width:0;font-size:13px;font-weight:600;line-height:20px}",
       ".sm-ocProject{flex:0 1 auto;min-width:0;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary);font-weight:400}",
       ".sm-ocPanel .sm-rowSecondary{flex:1 1 auto;min-width:0;justify-content:flex-end;gap:8px}",
       ".sm-ocPanel .sm-rowBadges{flex:1 1 auto;justify-content:flex-end;flex-wrap:nowrap;overflow:hidden}",
       ".sm-ocPanel .sm-priorityBadge.sm-priority-3{display:none}",
-      ".sm-ocPanel .sm-rowMeta{color:var(--dsw-alias-label-tertiary)}",
-      ".sm-ocPanel .sm-rowActions{position:absolute;right:6px;top:50%;transform:translateY(-50%);display:none;flex-wrap:nowrap;max-width:none;padding:2px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-base))}",
-      ".sm-ocPanel .sm-row:hover .sm-rowActions,.sm-ocPanel .sm-row:focus-within .sm-rowActions{display:flex}",
-      ".sm-ocPanel .sm-row:hover .sm-rowMeta,.sm-ocPanel .sm-row:focus-within .sm-rowMeta{visibility:hidden}",
+      ".sm-ocPanel .sm-tagChip,.sm-ocPanel .sm-priorityBadge{background:var(--sm-oc-fill-hover)}.sm-ocPanel .sm-rowMeta{color:var(--dsw-alias-label-tertiary)}",
       ".sm-ocTabMark{position:absolute;left:0;top:11px;bottom:11px;width:2px;border-radius:1px;background:var(--dsw-alias-label-tertiary)}",
+      // Thin overlay-style scrollbars (Chromium): the thumb only shows while hovering the scroll area.
+      ".sm-ocPanel .sm-ocSide::-webkit-scrollbar,.sm-ocPanel .sm-list::-webkit-scrollbar{width:10px;height:10px;background:transparent}",
+      ".sm-ocPanel .sm-ocSide::-webkit-scrollbar-track,.sm-ocPanel .sm-list::-webkit-scrollbar-track,.sm-ocPanel .sm-ocSide::-webkit-scrollbar-corner,.sm-ocPanel .sm-list::-webkit-scrollbar-corner{background:transparent}",
+      ".sm-ocPanel .sm-ocSide::-webkit-scrollbar-thumb,.sm-ocPanel .sm-list::-webkit-scrollbar-thumb{min-height:36px;border:3px solid transparent;border-radius:999px;background-color:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 24%,transparent);background-clip:padding-box}",
+      ".sm-ocPanel .sm-ocSide::-webkit-scrollbar-thumb:hover,.sm-ocPanel .sm-list::-webkit-scrollbar-thumb:hover{background-color:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 42%,transparent);background-clip:padding-box}",
+      ".sm-ocPanel .sm-ocSide:not(:hover)::-webkit-scrollbar-thumb,.sm-ocPanel .sm-list:not(:hover)::-webkit-scrollbar-thumb{background-color:transparent}",
+      // Right-click menu for a session row (portaled to the overlay root, above the page).
+      ".sm-ocCtxMenu{position:fixed;z-index:10000;box-sizing:border-box;min-width:176px;max-width:280px;padding:4px;border-radius:10px;border:.5px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));background:color-mix(in srgb,var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-base,#26262b)) 94%,transparent);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 8px 28px rgba(0,0,0,.28);color:var(--dsw-alias-label-primary,#111);font-size:13px;line-height:18px;user-select:none;-webkit-user-select:none}",
+      ".sm-ocCtxItem{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;text-align:left;white-space:nowrap;cursor:pointer;outline:none}",
+      ".sm-ocCtxItem:hover:not(:disabled),.sm-ocCtxItem:focus-visible{background:var(--dsw-alias-interactive-bg-hover)}.sm-ocCtxItem:disabled{opacity:.45;cursor:default}",
+      ".sm-ocCtxIcon{flex:none;width:16px;height:16px;display:inline-grid;place-items:center;color:var(--dsw-alias-label-secondary)}.sm-ocCtxIcon svg{width:14px;height:14px}",
+      ".sm-ocCtxLabel{min-width:0;overflow:hidden;text-overflow:ellipsis}",
+      ".sm-ocCtxDanger,.sm-ocCtxDanger .sm-ocCtxIcon{color:var(--dsw-alias-state-error-primary,#d92d20)}.sm-ocCtxDanger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover-danger)}",
+      ".sm-ocCtxSep{height:.5px;margin:4px 6px;background:var(--dsw-alias-border-l2,rgba(128,128,128,.28))}",
       "@media(max-width:860px){.sm-ocWrap{grid-template-columns:minmax(0,1fr);padding:16px 16px 0}.sm-ocSide{display:none}.sm-ocSearch,.sm-ocMainHead,.sm-ocMainBody{grid-column:1}.sm-ocNarrow{padding:12px 16px 0}}",
       "body:has(.sm-ocPanel) .sm-confirmDialog.sm-nativeDialogLayer:not(.sm-confirmDialog-anchored),body:has(.sm-ocPanel) .sm-bulkDialog.sm-nativeDialogLayer:not(.sm-bulkDialog-anchored),body:has(.sm-ocPanel) .sm-annotationDialog.sm-confirmDialog.sm-nativeDialogLayer:not(.sm-annotationDialog-anchored){inset:50% auto auto 50%!important;transform:translate(-50%,-50%)!important}",
     ].join("");
@@ -1088,19 +1120,60 @@ function isTopmostDialog(z) {
       } catch (_) { /* storage unavailable: fall back to the default */ }
       return SM_DIALOG_OPACITY.default;
     }
+    // Frosted-glass backdrop for translucent dialogs: an on/off switch and a blur
+    // strength in px, both user-adjustable in the settings card. The blur is only
+    // applied while the dialog opacity is below 100% (nothing shows through otherwise).
+    const SM_GLASS = {
+      enabledKey: "dsh-session-manager-glass-enabled",
+      blurKey: "dsh-session-manager-glass-blur",
+      enabledDefault: true,
+      blur: { min: 0, max: 64, step: 2, default: 24 }
+    };
+    const SM_GLASS_BLUR_VAR = "--sm-glass-blur";
+    function smNormalizeGlassBlur(value) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return SM_GLASS.blur.default;
+      const { min, max, step } = SM_GLASS.blur;
+      if (numeric <= min) return min;
+      if (numeric >= max) return max;
+      return Math.min(max, Math.max(min, min + Math.round((numeric - min) / step) * step));
+    }
+    function smReadGlass() {
+      let enabled = SM_GLASS.enabledDefault;
+      let blur = SM_GLASS.blur.default;
+      try {
+        if (typeof localStorage !== "undefined") {
+          const rawEnabled = localStorage.getItem(SM_GLASS.enabledKey);
+          if (rawEnabled === "0" || rawEnabled === "false") enabled = false;
+          else if (rawEnabled === "1" || rawEnabled === "true") enabled = true;
+          const rawBlur = localStorage.getItem(SM_GLASS.blurKey);
+          if (rawBlur !== null && rawBlur !== "") blur = smNormalizeGlassBlur(rawBlur);
+        }
+      } catch (_) { /* storage unavailable: defaults */ }
+      return { enabled, blur };
+    }
+    function smSyncGlass(opacityPercent) {
+      try {
+        const root = typeof document !== "undefined" ? document.documentElement : null;
+        if (!root || !root.style) return;
+        const glass = smReadGlass();
+        root.style.setProperty(SM_GLASS_BLUR_VAR, glass.blur + "px");
+        const on = opacityPercent < 100 && glass.enabled && glass.blur > 0;
+        if (on) {
+          if (typeof root.setAttribute === "function") root.setAttribute("data-sm-translucent", "");
+        } else if (typeof root.removeAttribute === "function") {
+          root.removeAttribute("data-sm-translucent");
+        }
+      } catch (_) { /* ignore */ }
+    }
     function applyDialogOpacity(value) {
       const percent = smNormalizeDialogOpacity(value);
       try {
         if (typeof document !== "undefined" && document.documentElement && document.documentElement.style) {
           document.documentElement.style.setProperty(SM_DIALOG_OPACITY_VAR, percent + "%");
-          // Translucent dialogs get a frosted-glass backdrop (see CSS) so whatever
-          // sits behind them stays unreadable noise instead of fighting the text.
-          if (typeof document.documentElement.setAttribute === "function") {
-            if (percent < 100) document.documentElement.setAttribute("data-sm-translucent", "");
-            else document.documentElement.removeAttribute("data-sm-translucent");
-          }
         }
       } catch (_) { /* ignore */ }
+      smSyncGlass(percent);
       return percent;
     }
     applyDialogOpacity(smReadDialogOpacity());
@@ -1231,6 +1304,81 @@ function isTopmostDialog(z) {
         if (RDOMC && typeof RDOMC.createPortal === "function") return RDOMC.createPortal;
       } catch (_) {}
       return null;
+    }
+
+    // Right-click menu for a session row. Rendered in the overlay root; closes on
+    // outside press (swallowing the click that follows so it cannot open a row),
+    // Escape, window blur, resize and scroll.
+    const useIsoLayoutEffect = typeof React.useLayoutEffect === "function" ? React.useLayoutEffect : useEffect;
+    function SessionContextMenu(props) {
+      const { x, y, items, onClose } = props;
+      const menuRef = useRef(null);
+      const [position, setPosition] = useState({ x, y });
+      useIsoLayoutEffect(() => {
+        const el = menuRef.current;
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const nextX = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
+        const nextY = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
+        setPosition(prev => (prev.x === nextX && prev.y === nextY ? prev : { x: nextX, y: nextY }));
+      }, [x, y, items.length]);
+      useEffect(() => {
+        const swallowNextClick = () => {
+          const block = (event) => { event.stopPropagation(); event.preventDefault(); };
+          window.addEventListener("click", block, true);
+          setTimeout(() => window.removeEventListener("click", block, true), 350);
+        };
+        const onPointerDown = (event) => {
+          if (menuRef.current && menuRef.current.contains(event.target)) return;
+          swallowNextClick();
+          onClose();
+        };
+        const onKeyDown = (event) => {
+          if (event.key !== "Escape") return;
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+        };
+        const dismiss = () => onClose();
+        document.addEventListener("pointerdown", onPointerDown, true);
+        document.addEventListener("keydown", onKeyDown, true);
+        window.addEventListener("blur", dismiss);
+        window.addEventListener("resize", dismiss);
+        window.addEventListener("scroll", dismiss, true);
+        return () => {
+          document.removeEventListener("pointerdown", onPointerDown, true);
+          document.removeEventListener("keydown", onKeyDown, true);
+          window.removeEventListener("blur", dismiss);
+          window.removeEventListener("resize", dismiss);
+          window.removeEventListener("scroll", dismiss, true);
+        };
+      }, [onClose]);
+      const menu = h("div", { className: "sm-overlayLayer" },
+        h("div", {
+          ref: menuRef,
+          className: "sm-ocCtxMenu",
+          role: "menu",
+          style: { left: position.x + "px", top: position.y + "px" },
+          onContextMenu: (event) => event.preventDefault()
+        },
+          items.map(item => item.separator
+            ? h("div", { key: item.key, className: "sm-ocCtxSep", role: "separator" })
+            : h("button", {
+                key: item.key,
+                type: "button",
+                role: item.checked === undefined ? "menuitem" : "menuitemcheckbox",
+                "aria-checked": item.checked === undefined ? undefined : item.checked,
+                "aria-label": item.ariaLabel,
+                className: "sm-ocCtxItem" + (item.danger ? " sm-ocCtxDanger" : ""),
+                disabled: item.disabled === true,
+                onClick: () => { onClose(); item.run(); }
+              },
+                h("span", { className: "sm-ocCtxIcon", "aria-hidden": "true" }, item.icon || null),
+                h("span", { className: "sm-ocCtxLabel" }, item.label)
+              ))
+        )
+      );
+      return renderInOverlay(menu);
     }
 
     function renderInOverlay(vnode) {
@@ -4240,6 +4388,42 @@ function isTopmostDialog(z) {
       resetDialogOpacity() {
         return this.setDialogOpacity(SM_DIALOG_OPACITY.default);
       },
+      // Frosted-glass backdrop preferences (switch + blur strength in px).
+      GLASS: SM_GLASS,
+      getGlassEnabled() {
+        return smReadGlass().enabled;
+      },
+      getGlassBlur() {
+        return smReadGlass().blur;
+      },
+      setGlassEnabled(value) {
+        const enabled = value === true || value === "true" || value === 1 || value === "1";
+        try {
+          if (typeof localStorage !== "undefined") localStorage.setItem(SM_GLASS.enabledKey, enabled ? "1" : "0");
+        } catch (_) {}
+        smSyncGlass(smReadDialogOpacity());
+        this._notify();
+        return enabled;
+      },
+      setGlassBlur(value) {
+        const next = smNormalizeGlassBlur(value);
+        try {
+          if (typeof localStorage !== "undefined") localStorage.setItem(SM_GLASS.blurKey, String(next));
+        } catch (_) {}
+        smSyncGlass(smReadDialogOpacity());
+        this._notify();
+        return next;
+      },
+      resetGlass() {
+        try {
+          if (typeof localStorage !== "undefined") {
+            localStorage.removeItem(SM_GLASS.enabledKey);
+            localStorage.removeItem(SM_GLASS.blurKey);
+          }
+        } catch (_) {}
+        smSyncGlass(smReadDialogOpacity());
+        this._notify();
+      },
       REGISTRY_OPTIONS: {
         "registry.npmjs.org": "https://registry.npmjs.org",
         "registry.npmmirror.com": "https://registry.npmmirror.com",
@@ -4671,6 +4855,7 @@ function isTopmostDialog(z) {
       const [priorityFilter, setPriorityFilter] = useState("all");
       const [annotationFor, setAnnotationFor] = useState(null);
       const [annotationAnchor, setAnnotationAnchor] = useState(null);
+      const [ctxMenu, setCtxMenu] = useState(null);
       const list = (typeof useSessions === "function" ? useSessions((s) => s) : null) || { ids: [], byId: {} };
       const workspaceSnapshot = (typeof useWorkspaces === "function" ? useWorkspaces((s) => s) : null) || { items: [] };
       const archivedIds = workspaceSnapshot.archivedSessionIds || [];
@@ -5236,15 +5421,13 @@ function isTopmostDialog(z) {
       const renderProjectItem = (value, label, title) => h("button", {
         key: value,
         type: "button",
-        className: "sm-ocProjectItem" + (workspaceFilter === value ? " sm-on" : "") + (value === "all" ? " sm-ocProjectAll" : ""),
+        className: "sm-ocProjectItem" + (workspaceFilter === value ? " sm-on" : ""),
         "aria-pressed": workspaceFilter === value,
         title: title || label,
-        onClick: () => setWorkspaceFilter(value)
+        // Selected -> only this project's sessions; click again to deselect -> all sessions.
+        onClick: () => setWorkspaceFilter(current => current === value ? "all" : value)
       },
-        value === "all"
-          ? h("span", { className: "sm-ocBadge sm-ocBadgeAll", "aria-hidden": "true" },
-              h("svg", { viewBox: "0 0 16 16", width: 12, height: 12, fill: "none", stroke: "currentColor", strokeWidth: 1.4, strokeLinecap: "round", "aria-hidden": "true" }, h("path", { d: "M3 4.5h10M3 8h10M3 11.5h10" })))
-          : h("span", { className: "sm-ocBadge", "aria-hidden": "true" }, String(label || "?").trim().charAt(0).toUpperCase() || "?"),
+        h("span", { className: "sm-ocBadge", "aria-hidden": "true" }, String(label || "?").trim().charAt(0).toUpperCase() || "?"),
         h("span", { className: "sm-ocProjectName" }, label)
       );
       const renderRow = (s, rank) => {
@@ -5267,17 +5450,46 @@ function isTopmostDialog(z) {
                 onChange: (e) => toggleSelect(s.id, e.shiftKey === true, rank)
               })
             );
+        const sessionTitle = s.blank ? t("panel.session.new") : (s.displayTitle || s.id);
+        // Left click anywhere on the row opens the session (or toggles selection in
+        // batch mode). Every other action lives in the right-click menu.
+        const openRow = (e) => {
+          if (busy || bulkBusy) return;
+          if (selectModeEnabled || selectedIds.size > 0) { toggleSelect(s.id, !!(e && e.shiftKey), rank); return; }
+          if (isArchived) {
+            if (isWsArchived) { if (typeof window !== "undefined" && typeof window.alert === "function") { window.alert(t("error.workspaceArchived")); } return; }
+            /* DSH refuses to surface an archived session as the current view: unarchive first, then open. (issue #17.4) */
+            runRow(s.id, async () => { await onUnarchive(s.id); await onOpen(s.id); });
+          } else {
+            onOpen(s.id);
+          }
+        };
+        const openCtx = (x, y) => setCtxMenu({ x, y, session: s });
         return h("div", {
           key: s.id,
           "data-session-id": s.id,
-          className: "sm-row" + (isCurrent ? " sm-rowCurrent" : "") + (isSelected ? " sm-rowBulkSelected" : "") + (isTabOpen ? " sm-rowTabOpen" : "")
+          role: "button",
+          tabIndex: 0,
+          "aria-label": sessionTitle,
+          className: "sm-row" + (isCurrent ? " sm-rowCurrent" : "") + (isSelected ? " sm-rowBulkSelected" : "") + (isTabOpen ? " sm-rowTabOpen" : "") + (busy ? " sm-rowBusy" : ""),
+          onClick: (e) => { if (e.defaultPrevented) return; openRow(e); },
+          onContextMenu: (e) => { e.preventDefault(); e.stopPropagation(); openCtx(e.clientX, e.clientY); },
+          onKeyDown: (e) => {
+            if (e.target !== e.currentTarget) return;
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openRow(e); }
+            else if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+              e.preventDefault();
+              const rect = e.currentTarget.getBoundingClientRect();
+              openCtx(rect.left + 24, rect.bottom - 6);
+            }
+          }
         },
           h("div", { className: "sm-rowCheckboxSlot" + ((selectedIds.size > 0 || selectModeEnabled) ? " sm-rowCheckboxSlot-visible" : "") }, checkbox),
           isTabOpen ? h("span", { className: "sm-ocTabMark", title: t("oc.openInTab"), "aria-label": t("oc.openInTab") }) : null,
           h("span", { className: "sm-ocBadge", "aria-hidden": "true" }, (projectLabel || (s.displayTitle || s.id || "?")).trim().charAt(0).toUpperCase() || "?"),
           h("div", { className: "sm-rowMain" },
             h("div", { className: "sm-rowTitle" },
-              h("span", null, s.blank ? t("panel.session.new") : (s.displayTitle || s.id)),
+              h("span", null, sessionTitle),
               projectLabel ? h("span", { className: "sm-ocProject", title: s.cwd || projectLabel }, projectLabel) : null,
               isWsArchived ? h("span", { className: "sm-badge sm-badgeWorkspaceArchived" }, t("panel.workspaceArchived")) : null,
               isArchived ? h("span", { className: "sm-badge sm-badgeArchived" }, t("panel.archived")) : null,
@@ -5287,57 +5499,11 @@ function isTopmostDialog(z) {
             h("div", { className: "sm-rowSecondary" },
               h("div", { className: "sm-rowBadges" },
                 h("span", { className: "sm-priorityBadge sm-priority-" + (mark.priority ?? 3), title: t("marks.priority." + (mark.priority ?? 3)) }, "P" + (mark.priority ?? 3)),
-                mark.tags.slice(0, 2).map(tag => h("button", { key: tag, type: "button", className: "sm-tagChip", title: tag, onClick: () => setTagFilter("tag:" + tag.toLowerCase()) }, tag)),
+                mark.tags.slice(0, 2).map(tag => h("button", { key: tag, type: "button", className: "sm-tagChip", title: tag, onClick: (e) => { e.stopPropagation(); setTagFilter("tag:" + tag.toLowerCase()); } }, tag)),
                 mark.tags.length > 2 ? h("span", { title: mark.tags.join(", ") }, "+" + (mark.tags.length - 2)) : null,
-                mark.note ? h("button", { type: "button", className: "sm-noteBadge", title: t("marks.note.exists"), onClick: () => { setAnnotationAnchor(null); setAnnotationFor(current => current?.id === s.id ? null : s); } }, "✎") : null
+                mark.note ? h("button", { type: "button", className: "sm-noteBadge", title: t("marks.note.exists"), onClick: (e) => { e.stopPropagation(); setAnnotationAnchor(null); setAnnotationFor(current => current?.id === s.id ? null : s); } }, "\u270E") : null
               ),
-              h("div", { className: "sm-rowMeta", title: s.cwd || undefined }, formatRelative(s.updatedAt, now)),
-              h("div", { className: "sm-rowActions" },
-                h("button", { type: "button", className: "sm-rowBtn", disabled: busy, onClick: () => { if (isArchived) { if (isWsArchived) { if (typeof window !== "undefined" && typeof window.alert === "function") { window.alert(t("error.workspaceArchived")); } return; } /* DSH refuses to surface an archived session as the current view: clicking "Open" on an archived row flashes an empty chat panel and bounces back to "no session selected". Unarchive first, then open. (issue #17.4) */ runRow(s.id, async () => { await onUnarchive(s.id); await onOpen(s.id); }); } else { onOpen(s.id); } } }, t("row.open")),
-                renderTip(t(isArchived ? "row.unarchive" : "row.archive"), h("button", {
-                  type: "button",
-                  className: "sm-rowBtn sm-rowBtnIcon" + (isArchived ? " sm-rowBtnActive" : ""),
-                  disabled: busy,
-                  "aria-label": t(isArchived ? "row.unarchive" : "row.archive") + ": " + (s.displayTitle || s.id),
-                  onClick: () => runRow(s.id, () => {
-                    if (isArchived) {
-                      if (isWsArchived) {
-                        if (typeof window !== "undefined" && typeof window.alert === "function") {
-                          window.alert(t("error.workspaceArchived"));
-                        }
-                        return;
-                      }
-                      return onUnarchive(s.id);
-                    }
-                    return onArchive(s.id);
-                  })
-                },
-                  h("span", { className: "sm-headerBtnIcon" }, HeaderArchiveIcon({ unarchive: isArchived })),
-                  h("span", { className: "sm-rowBtnLabel" }, t(isArchived ? "row.unarchive" : "row.archive"))
-                )),
-                annotationButtons(s.id, s.displayTitle || s.id, t, annotations, "sm-rowBtn", patch => runRow(s.id, () => annotationStore.save(s.id, patch)), () => { setAnnotationAnchor(null); setAnnotationFor(current => current?.id === s.id ? null : s); }, busy),
-                renderTip(t("row.move"), h("button", {
-                  type: "button",
-                  className: "sm-rowBtn sm-rowBtnIcon" + (moveFor && moveFor.id === s.id ? " sm-rowBtnActive" : ""),
-                  disabled: busy,
-                  "aria-label": t("row.move") + ": " + (s.displayTitle || s.id),
-                  onClick: () => { if (moveFor && moveFor.id === s.id) setMoveFor(null); else setMoveFor(s); }
-                },
-                  h("span", { className: "sm-headerBtnIcon" }, HeaderMoveIcon()),
-                  h("span", { className: "sm-rowBtnLabel" }, t("row.move"))
-                )),
-                h("button", { type: "button", className: "sm-rowBtn", disabled: busy, onClick: () => { if (migrateFor && migrateFor.id === s.id) setMigrateFor(null); else setMigrateFor(s); } }, t("row.migrate")),
-                renderTip(t("row.delete"), h("button", {
-                  type: "button",
-                  className: "sm-rowBtn sm-rowBtnDanger sm-rowBtnIcon" + (confirmFor && confirmFor.id === s.id ? " sm-rowBtnActive" : ""),
-                  disabled: busy,
-                  "aria-label": t("row.delete") + ": " + (s.displayTitle || s.id),
-                  onClick: () => { if (confirmFor && confirmFor.id === s.id) setConfirmFor(null); else setConfirmFor(s); }
-                },
-                  h("span", { className: "sm-headerBtnIcon" }, HeaderTrashIcon()),
-                  h("span", { className: "sm-rowBtnLabel" }, t("row.delete"))
-                ))
-              )
+              h("div", { className: "sm-rowMeta", title: s.cwd || undefined }, formatRelative(s.updatedAt, now))
             )
           )
         );
@@ -5641,6 +5807,44 @@ function isTopmostDialog(z) {
         ? h("div", { className: "sm-empty" }, allWorkspaceRows.length > 0 ? t("workspace.empty.filtered") : t("workspace.empty"))
         : h("div", { className: "sm-list" }, filteredWorkspaceRows.map((ws, rank) => renderWorkspaceRow(ws, rank)));
 
+      // Right-click menu: every per-session action lives here (left click opens).
+      const closeCtxMenu = useMemo(() => () => setCtxMenu(null), []);
+      const buildCtxItems = (s) => {
+        const isArchived = archived.has(s.id);
+        const isWsArchived = isSessionWorkspaceArchived(s);
+        const mark = annotationOf(annotations, s.id);
+        const marksBusy = !annotations.loaded || !!annotations.error || annotations.pending.has(s.id);
+        const rowBusy = busyId === s.id;
+        const sTitle = s.displayTitle || s.id;
+        return [
+          { key: "favorite", icon: HeaderStarIcon({ filled: mark.favorite }), label: t(mark.favorite ? "marks.favorite.remove" : "marks.favorite.add"), ariaLabel: t(mark.favorite ? "marks.favorite.remove" : "marks.favorite.add") + ": " + sTitle, checked: mark.favorite, disabled: marksBusy || rowBusy, run: () => runRow(s.id, () => annotationStore.save(s.id, { favorite: !mark.favorite })) },
+          { key: "review", icon: HeaderClockIcon(), label: t(mark.reviewLater ? "marks.review.remove" : "marks.review.add"), ariaLabel: t(mark.reviewLater ? "marks.review.remove" : "marks.review.add") + ": " + sTitle, checked: mark.reviewLater, disabled: marksBusy || rowBusy, run: () => runRow(s.id, () => annotationStore.save(s.id, { reviewLater: !mark.reviewLater })) },
+          { key: "edit", icon: HeaderTagIcon(), label: t("marks.edit"), ariaLabel: t("marks.edit.aria") + ": " + sTitle, disabled: marksBusy || rowBusy, run: () => { setAnnotationAnchor(null); setAnnotationFor(current => current?.id === s.id ? null : s); } },
+          { key: "sep-1", separator: true },
+          {
+            key: "archive",
+            icon: HeaderArchiveIcon({ unarchive: isArchived }),
+            label: t(isArchived ? "row.unarchive" : "row.archive"),
+            ariaLabel: t(isArchived ? "row.unarchive" : "row.archive") + ": " + sTitle,
+            disabled: rowBusy,
+            run: () => runRow(s.id, () => {
+              if (isArchived) {
+                if (isWsArchived) {
+                  if (typeof window !== "undefined" && typeof window.alert === "function") window.alert(t("error.workspaceArchived"));
+                  return;
+                }
+                return onUnarchive(s.id);
+              }
+              return onArchive(s.id);
+            })
+          },
+          { key: "move", icon: HeaderMoveIcon(), label: t("row.move"), ariaLabel: t("row.move") + ": " + sTitle, disabled: rowBusy, run: () => setMoveFor(s) },
+          { key: "migrate", label: t("row.migrate"), ariaLabel: t("row.migrate") + ": " + sTitle, disabled: rowBusy, run: () => setMigrateFor(s) },
+          { key: "sep-2", separator: true },
+          { key: "delete", icon: HeaderTrashIcon(), label: t("row.delete"), ariaLabel: t("row.delete") + ": " + sTitle, danger: true, disabled: rowBusy, run: () => setConfirmFor(s) }
+        ];
+      };
+      const ctxMenuNode = ctxMenu ? h(SessionContextMenu, { key: "sm-ctx-menu", x: ctxMenu.x, y: ctxMenu.y, items: buildCtxItems(ctxMenu.session), onClose: closeCtxMenu }) : null;
       const onPanelClose = () => {
         if (busyId !== null || wsBulkBusy) return;
         setConfirmFor(null);
@@ -5710,7 +5914,7 @@ function isTopmostDialog(z) {
           if (activeDialogZStack && activeDialogZStack.length > 0) return;
           if (panelRef.current && typeof panelRef.current.contains === "function" && panelRef.current.contains(e.target)) return;
           if (e.target && typeof e.target.closest === "function") {
-            if (e.target.closest(".sm-nativeDialog, .sm-panelDialog, .sm-bulkDialog, .sm-annotationDialog, .sm-annotationSurface, .sm-tooltip, .sm-footerBtn")) return;
+            if (e.target.closest(".sm-nativeDialog, .sm-panelDialog, .sm-bulkDialog, .sm-annotationDialog, .sm-annotationSurface, .sm-tooltip, .sm-footerBtn, .sm-ocCtxMenu")) return;
           }
           s.onPanelClose();
         };
@@ -5956,7 +6160,6 @@ function isTopmostDialog(z) {
                     h("path", { d: "M12.5 10v4M10.5 12h4" })))) : null
                 ),
                 h("div", { className: "sm-ocProjects" },
-                  renderProjectItem("all", t("oc.allProjects")),
                   workspaces
                     .filter(workspace => !workspaceArchiveStore.isArchived(workspace.id) || workspaceFilter === workspaceValue(workspace.id))
                     .map(workspace => renderProjectItem(workspaceValue(workspace.id), workspace.title || workspace.name || workspace.id, workspace.path)),
@@ -6257,7 +6460,7 @@ function isTopmostDialog(z) {
       // Bulk dialogs are portaled into the overlay root like every other
       // dialog, so their static z-index (10002) only orders them inside that
       // context; the root's own 1050 keeps them below DSH's 1100 tooltip tier.
-      return h(React.Fragment, null, panelModal, annotationDialog, moveDialog, deleteDialog, migrateDialog, bulkPreviewDialog, bulkProgressDialog, bulkResultDialog, bulkTagDialog, bulkPriorityDialog, bulkMoveDialog, bulkPresetDialog, workspaceArchiveConfirmDialog);
+      return h(React.Fragment, null, panelModal, ctxMenuNode, annotationDialog, moveDialog, deleteDialog, migrateDialog, bulkPreviewDialog, bulkProgressDialog, bulkResultDialog, bulkTagDialog, bulkPriorityDialog, bulkMoveDialog, bulkPresetDialog, workspaceArchiveConfirmDialog);
     }
 
     function HeaderAction(props) {
@@ -7074,6 +7277,8 @@ function isTopmostDialog(z) {
       const onDialogOpacityChange = (e) => {
         updateStore.setDialogOpacity(e.target.value);
       };
+      const glassEnabled = updateStore.getGlassEnabled();
+      const glassBlur = updateStore.getGlassBlur();
 
       useEffect(() => {
         try { updateStore.checkRecentStatus().catch(() => {}); } catch (_) {}
@@ -7202,6 +7407,51 @@ function isTopmostDialog(z) {
                 className: "sm-settingsResetBtn",
                 disabled: dialogOpacity === updateStore.DIALOG_OPACITY.default,
                 onClick: () => updateStore.resetDialogOpacity()
+              }, t("settings.dialogOpacity.reset"))
+            )
+          ),
+          h("div", { className: "sm-settingsRow" },
+            h("div", { className: "sm-settingsRowLeft" },
+              h("span", null, t("settings.glass")),
+              h("span", { className: "sm-settingsHint sm-settingsHintInline" }, t("settings.glass.hint"))
+            ),
+            h("label", { className: "sm-settingsCheckbox" },
+              h("input", {
+                type: "checkbox",
+                checked: glassEnabled,
+                onChange: (e) => updateStore.setGlassEnabled(e.target.checked),
+                "aria-label": t("settings.glass")
+              }),
+              h("span", null, t("settings.glass.enable"))
+            )
+          ),
+          h("div", { className: "sm-settingsRow" },
+            h("div", { className: "sm-settingsRowLeft" },
+              h("span", null, t("settings.glassBlur")),
+              h("span", { className: "sm-settingsHint sm-settingsHintInline" }, t("settings.glassBlur.hint"))
+            ),
+            h("div", { className: "sm-settingsSlider" },
+              h("input", {
+                type: "range",
+                className: "sm-settingsRange",
+                min: updateStore.GLASS.blur.min,
+                max: updateStore.GLASS.blur.max,
+                step: updateStore.GLASS.blur.step,
+                value: glassBlur,
+                disabled: !glassEnabled,
+                "aria-label": t("settings.glassBlur"),
+                "aria-valuemin": updateStore.GLASS.blur.min,
+                "aria-valuemax": updateStore.GLASS.blur.max,
+                "aria-valuenow": glassBlur,
+                "aria-valuetext": t("settings.glassBlur.value", { value: glassBlur }),
+                onChange: (e) => updateStore.setGlassBlur(e.target.value)
+              }),
+              h("span", { className: "sm-settingsRangeValue" }, t("settings.glassBlur.value", { value: glassBlur })),
+              h("button", {
+                type: "button",
+                className: "sm-settingsResetBtn",
+                disabled: glassEnabled === updateStore.GLASS.enabledDefault && glassBlur === updateStore.GLASS.blur.default,
+                onClick: () => updateStore.resetGlass()
               }, t("settings.dialogOpacity.reset"))
             )
           )

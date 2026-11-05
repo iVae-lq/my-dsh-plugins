@@ -65,8 +65,8 @@ test("Issue #46: rendered header buttons maintain stable 28px dimensions regardl
   }
 });
 
-test("Issue #46 / Panel row actions: single session row actions matching header use icons only; non-header and bulk buttons keep text", async (t) => {
-  // Static CSS rule hiding row button label text
+test("Issue #46 / Panel row actions: the six header-matching actions render icon + label in the row context menu; migrate is text only", async (t) => {
+  // Legacy hover-cluster CSS stays in the bundle for the annotation surface.
   assert.match(SRC, /\.sm-rowActions\s*\.sm-rowBtnLabel\{display:none\}/);
   assert.match(SRC, /\.sm-panelDialog \.sm-rowActions \.sm-rowBtn\.sm-rowBtnIcon/);
 
@@ -77,43 +77,40 @@ test("Issue #46 / Panel row actions: single session row actions matching header 
   t.after(() => app.dispose());
   await app.flush();
 
-  const tree = app.tree;
-  const rowActions = nodes(tree, n => n.props?.className === "sm-rowActions")[0];
-  assert.ok(rowActions, "sm-rowActions must be rendered in panel row");
+  assert.equal(nodes(app.tree, n => n.props?.className === "sm-rowActions").length, 0, "rows no longer render an inline action cluster");
+  assert.ok(app.openRowMenu("Alpha Session"), "right-click opens the row menu");
+  const menu = nodes(app.tree, n => n.props?.className === "sm-ocCtxMenu")[0];
+  assert.ok(menu, "context menu must be rendered");
 
-  // Buttons matching header: favorite, review, edit, archive, move, delete
-  const favBtn = nodes(rowActions, n => n.props?.["aria-label"]?.includes("收藏会话"))[0];
-  const revBtn = nodes(rowActions, n => n.props?.["aria-label"]?.includes("标记待回看"))[0];
-  const editBtn = nodes(rowActions, n => n.props?.["aria-label"]?.includes("编辑标签、备注和优先级"))[0];
-  const archiveBtn = nodes(rowActions, n => n.props?.["aria-label"]?.startsWith("归档:") || n.props?.["aria-label"]?.startsWith("移出归档:"))[0];
-  const moveBtn = nodes(rowActions, n => n.props?.["aria-label"]?.startsWith("移动至工作区:"))[0];
-  const deleteBtn = nodes(rowActions, n => n.props?.["aria-label"]?.startsWith("删除会话:"))[0];
+  // Items matching the header: favorite, review, edit, archive, move, delete
+  const favBtn = nodes(menu, n => n.props?.["aria-label"]?.includes("收藏会话"))[0];
+  const revBtn = nodes(menu, n => n.props?.["aria-label"]?.includes("标记待回看"))[0];
+  const editBtn = nodes(menu, n => n.props?.["aria-label"]?.includes("编辑标签、备注和优先级"))[0];
+  const archiveBtn = nodes(menu, n => n.props?.["aria-label"]?.startsWith("归档:") || n.props?.["aria-label"]?.startsWith("移出归档:"))[0];
+  const moveBtn = nodes(menu, n => n.props?.["aria-label"]?.startsWith("移动至工作区:"))[0];
+  const deleteBtn = nodes(menu, n => n.props?.["aria-label"]?.startsWith("删除会话:"))[0];
 
-  assert.ok(favBtn, "favorite button must exist in row");
-  assert.ok(revBtn, "review later button must exist in row");
-  assert.ok(editBtn, "edit button must exist in row");
-  assert.ok(archiveBtn, "archive button must exist in row");
-  assert.ok(moveBtn, "move button must exist in row");
-  assert.ok(deleteBtn, "delete button must exist in row");
+  assert.ok(favBtn, "favorite item must exist in the menu");
+  assert.ok(revBtn, "review later item must exist in the menu");
+  assert.ok(editBtn, "edit item must exist in the menu");
+  assert.ok(archiveBtn, "archive item must exist in the menu");
+  assert.ok(moveBtn, "move item must exist in the menu");
+  assert.ok(deleteBtn, "delete item must exist in the menu");
 
-  // Each of these 6 buttons must render an SVG icon and have their text label wrapped in .sm-rowBtnLabel
   for (const btn of [favBtn, revBtn, editBtn, archiveBtn, moveBtn, deleteBtn]) {
     const svgs = nodes(btn, n => n.type === "svg");
-    assert.ok(svgs.length > 0, "row action matching header must render SVG icon");
+    assert.ok(svgs.length > 0, "menu item matching the header must render an SVG icon");
     assert.equal(svgs[0].props.width, 14);
     assert.equal(svgs[0].props.height, 14);
   }
 
-  // Buttons NOT in header: "打开" (open) and "迁移预设" (migrate)
-  // They must NOT have SVG icons and must display text directly
-  const openBtn = nodes(rowActions, n => n.type === "button" && text(n) === "打开")[0];
-  assert.ok(openBtn, "open button must exist with visible text");
-  assert.equal(nodes(openBtn, n => n.type === "svg").length, 0, "open button must NOT render SVG icon");
+  // "迁移预设" (migrate) has no icon and shows its text directly; there is no "打开" entry.
+  const openBtn = nodes(menu, n => n.type === "button" && text(n) === "打开")[0];
+  assert.equal(openBtn, undefined, "left click opens a row; the menu has no Open item");
 
-  const migrateBtn = nodes(rowActions, n => n.type === "button" && text(n) === "迁移预设")[0];
-  assert.ok(migrateBtn, "migrate button must exist with visible text");
-  assert.equal(nodes(migrateBtn, n => n.type === "svg").length, 0, "migrate button must NOT render SVG icon");
-
+  const migrateBtn = nodes(menu, n => n.type === "button" && text(n) === "迁移预设")[0];
+  assert.ok(migrateBtn, "migrate item must exist with visible text");
+  assert.equal(nodes(migrateBtn, n => n.type === "svg").length, 0, "migrate item must NOT render SVG icon");
   // Bulk buttons: enter bulk mode and verify BulkActionBar component presence & source guards
   await app.clickLabel("进入批量管理模式");
   const bar = nodes(app.tree[0], n => typeof n.type === "function" && n.type.name === "BulkActionBar")[0];

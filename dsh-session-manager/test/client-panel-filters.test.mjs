@@ -244,7 +244,7 @@ test("title/activity-only updates do not refetch cached workspace metadata", asy
   assert.equal(app.workspaceRequests.length, 1);
 });
 
-test("clicking a row's Open button forwards the session id to ctx.sessions.open", async t => {
+test("left-clicking a row forwards the session id to ctx.sessions.open", async t => {
   // Two sessions sorted by updatedAt desc; "first" comes before "second".
   const app = await setup(t, {
     language: "en",
@@ -255,32 +255,17 @@ test("clicking a row's Open button forwards the session id to ctx.sessions.open"
     current: "first",
   });
   assert.equal(app.sessionOpenCalls.length, 0, "no opens recorded yet");
-  // Walk the panel tree and click every button whose onClick source mentions
-  // "onOpen". After flush, the spy should have recorded both ids -- proving
-  // the click handler is wired to ctx.sessions.open for every row.
-  const openButtons = [];
-  const walk = (node) => {
-    if (Array.isArray(node)) { for (const child of node) walk(child); return; }
-    if (!node || typeof node !== "object") return;
-    if (node.type === "button" && typeof node.props?.onClick === "function") {
-      const source = node.props.onClick.toString();
-      if (source.includes("onOpen")) openButtons.push(node);
-    }
-    const children = Array.isArray(node.props?.children) ? node.props.children : (node.props?.children ? [node.props.children] : []);
-    for (const child of children) walk(child);
-  };
-  walk(app.tree[0]);
-  assert.ok(openButtons.length >= 2, "every row should render an Open button");
-  for (const b of openButtons) b.props.onClick();
-  app.flush();
+  const rows = nodes(app.tree[0], n => n.props?.["data-session-id"]);
+  assert.equal(rows.length, 2, "every session renders one clickable row");
+  for (const row of rows) assert.equal(row.props.role, "button", "rows are buttons");
+  await app.clickRow("first");
+  await app.clickRow("second");
   assert.equal(app.sessionOpenCalls.length, 2, "Open should fire twice (one per row)");
-  assert.ok(app.sessionOpenCalls.includes("first"), "row 'first' Open should call ctx.sessions.open");
-  assert.ok(app.sessionOpenCalls.includes("second"), "row 'second' Open should call ctx.sessions.open");
+  assert.ok(app.sessionOpenCalls.includes("first"), "row 'first' click should call ctx.uiWorkspace.openSession");
+  assert.ok(app.sessionOpenCalls.includes("second"), "row 'second' click should call ctx.uiWorkspace.openSession");
 });
 
-test("clicking a specific row's Open button targets only that row", async t => {
-  // Two sessions sorted by updatedAt desc; "b" is not current so the row's
-  // Open handler is wired through the SessionManagerPanel, not the header.
+test("left-clicking a specific row targets only that row; Enter and Space open it too", async t => {
   const app = await setup(t, {
     language: "en",
     sessions: [
@@ -290,36 +275,56 @@ test("clicking a specific row's Open button targets only that row", async t => {
     current: "a",
   });
   assert.equal(app.sessionOpenCalls.length, 0, "no opens recorded yet");
-  // Walk the panel tree for any button whose onClick source mentions onOpen;
-  // the harness wraps row buttons in nested arrays so a flat node.props.children lookup misses them.
-  const openButtons = [];
-  const walk = (node) => {
-    if (Array.isArray(node)) { for (const child of node) walk(child); return; }
-    if (!node || typeof node !== "object") return;
-    if (node.type === "button" && typeof node.props?.onClick === "function") {
-      const source = node.props.onClick.toString();
-      if (source.includes("onOpen")) openButtons.push(node);
-    }
-    const children = Array.isArray(node.props?.children) ? node.props.children : (node.props?.children ? [node.props.children] : []);
-    for (const child of children) walk(child);
-  };
-  walk(app.tree[0]);
-  assert.ok(openButtons.length >= 2, "every row should render an Open button");
-  // Map each Open button to its enclosing row by walking the row containers.
-  const rows = nodes(app.tree[0], n => n.props?.["data-session-id"]);
-  const buttonForRow = new Map();
-  for (const row of rows) {
-    const buttonsInRow = nodes(row, n => n.type === "button" && typeof n.props?.onClick === "function" && n.props.onClick.toString().includes("onOpen"));
-    if (buttonsInRow.length > 0) buttonForRow.set(row.props["data-session-id"], buttonsInRow[0]);
-  }
-  const rowBButton = buttonForRow.get("b");
-  assert.ok(rowBButton, "should locate row b's Open button");
-  rowBButton.props.onClick();
-  app.flush();
+  await app.clickRow("b");
   assert.equal(app.sessionOpenCalls.length, 1, "Open should fire exactly once");
   assert.equal(app.sessionOpenCalls[0], "b", "open should target the clicked row");
+  const rowA = nodes(app.tree[0], n => n.props?.["data-session-id"] === "a")[0];
+  const key = { key: "Enter", preventDefault() {}, target: {}, currentTarget: {} };
+  key.target = key.currentTarget;
+  rowA.props.onKeyDown(key);
+  await app.flush();
+  assert.deepEqual(app.sessionOpenCalls, ["b", "a"], "Enter on a focused row opens it");
 });
 
+test("right-clicking a row opens a menu with every session action; Open is not in it", async t => {
+  const app = await setup(t, {
+    language: "en",
+    sessions: [{ id: "a", displayTitle: "A", updatedAt: 200 }],
+    current: "a",
+  });
+  assert.equal(app.menuOpen, false);
+  assert.ok(app.openRowMenu("A"), "context menu opens from the row");
+  assert.equal(app.menuOpen, true);
+  const labels = nodes(app.tree, n => n.type === "button" && n.props?.role?.startsWith("menuitem")).map(n => text(n));
+  const expected = ["marks.favorite.add", "marks.review.add", "marks.edit", "row.archive", "row.move", "row.migrate", "row.delete"].map(key => app.t(key));
+  assert.deepEqual(labels, expected, "menu lists every action, in order");
+  assert.ok(!labels.includes(app.t("row.open")), "left click opens; the menu has no Open entry");
+  assert.equal(nodes(app.tree[0], n => n.props?.className === "sm-rowActions").length, 0, "no hover action cluster inside the row");
+});
+
+test("project list: clicking a project filters to it, clicking again clears; there is no 'all sessions' entry", async t => {
+  const app = await setup(t, {
+    language: "en",
+    sessions: [
+      { id: "a", displayTitle: "A", updatedAt: 200, cwd: "/p/one" },
+      { id: "b", displayTitle: "B", updatedAt: 100, cwd: "/p/two" },
+    ],
+    workspaces: [
+      { id: "w1", title: "One", path: "/p/one", sessionIds: ["a"] },
+      { id: "w2", title: "Two", path: "/p/two", sessionIds: ["b"] },
+    ],
+    current: "a",
+  });
+  const items = () => nodes(app.tree[0], n => typeof n.props?.className === "string" && n.props.className.includes("sm-ocProjectItem"));
+  assert.equal(items().length, 2, "one item per workspace, no 'All sessions' entry");
+  assert.ok(items().every(n => !text(n).includes(app.t("oc.allProjects"))), "no 'All sessions' entry");
+  assert.deepEqual(app.rowIds().sort(), ["a", "b"], "nothing selected -> every session shown");
+  items()[0].props.onClick(); await app.flush();
+  assert.deepEqual(app.rowIds(), ["a"], "selected project -> only its sessions");
+  assert.equal(items()[0].props["aria-pressed"], true);
+  items()[0].props.onClick(); await app.flush();
+  assert.deepEqual(app.rowIds().sort(), ["a", "b"], "clicking the selected project again clears the filter");
+});
 
 test("panel: 4 select controls share one grid row in the panel header", async t => {
   // Layout consolidation: workspace, sort, tags, priority all live inside
@@ -465,7 +470,7 @@ test("panel: row has a permanent checkbox slot so layout is identical in and out
     "in bulk mode the slot must carry the visible class");
 });
 
-test("panel: rowMain puts title on line 1 and badges+meta+actions on line 2", async t => {
+test("panel: rowMain puts title and the badges+meta cluster side by side (actions moved to the context menu)", async t => {
   // Line 1 = sm-rowTitle; line 2 = sm-rowSecondary (wraps sm-rowBadges,
   // sm-rowMeta, sm-rowActions). This satisfies the user's request that
   // the P3 / tags / note chips sit on the same row as the action buttons.
@@ -485,7 +490,7 @@ test("panel: rowMain puts title on line 1 and badges+meta+actions on line 2", as
   const meta = nodes(secondary, n => n.props && n.props.className === "sm-rowMeta")[0];
   assert.ok(title, "sm-rowTitle must exist on line 1");
   assert.ok(secondary, "sm-rowSecondary must exist on line 2");
-  assert.ok(actions, "sm-rowActions must live inside sm-rowSecondary (same row as badges)");
+  assert.equal(actions, undefined, "row actions now live in the right-click menu, not inside the row");
   assert.ok(badges, "sm-rowBadges must live inside sm-rowSecondary");
   assert.ok(meta, "sm-rowMeta must live inside sm-rowSecondary");
 });

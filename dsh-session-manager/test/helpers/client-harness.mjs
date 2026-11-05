@@ -256,7 +256,7 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
   };
   const head = { appendChild(node) { if (node && node.dataset) styleTags.push(node); } };
   const body = element("body");
-  const document = { documentElement, body, head, querySelector: matchSelector, querySelectorAll: () => [], createElement: element };
+  const document = { documentElement, body, head, querySelector: matchSelector, querySelectorAll: () => [], createElement: element, addEventListener() {}, removeEventListener() {} };
   let exports;
   const window = {
     innerWidth, innerHeight, confirm, alert: message => alerts.push(message),
@@ -418,10 +418,43 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
   const safePanel = nodes(footerHost.tree, node => typeof node.type === "function" && node.type.prototype?.render)[0];
   const panel = new safePanel.type(safePanel.props).render();
   const panelHost = host(panel.type, panel.props);
-  let headerHost, dialogHost, dialogKey;
-  const control = (tree, label) => { const match = nodes(tree, node => node.props?.["aria-label"] === label)[0]; if (!match) throw new Error("Control not found: " + label); return match; };
+  let headerHost, dialogHost, dialogKey, menuHost;
+  // The row context menu is its own component (SessionContextMenu); host it like the
+  // annotation dialog so its items are part of api.tree.
+  const syncMenu = () => {
+    const node = nodes(panelHost.tree, n => n.type?.name === "SessionContextMenu")[0];
+    if (!node) { menuHost?.dispose(); menuHost = undefined; return; }
+    if (!menuHost) menuHost = host(node.type, node.props);
+    else { menuHost.props = node.props; menuHost.render(); }
+  };
+  const fakeEvent = (extra = {}) => ({ defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, stopPropagation() {}, clientX: 40, clientY: 40, ...extra });
+  /** Right-click a session row (found by its title) so its action menu is rendered. */
+  const openRowMenu = (title) => {
+    const row = nodes(panelHost.tree, node => node.props?.["data-session-id"] && node.props?.["aria-label"] === title)[0];
+    if (!row) return false;
+    row.props.onContextMenu(fakeEvent());
+    if (panelHost.dirty) panelHost.render();
+    syncMenu();
+    return true;
+  };
+  const control = (tree, label, allowMenu = false) => {
+    let match = nodes(tree, node => node.props?.["aria-label"] === label)[0];
+    if (!match && allowMenu) {
+      // Row actions live in the right-click menu: open it for the row named after the ": " suffix.
+      const title = String(label).includes(": ") ? String(label).slice(String(label).lastIndexOf(": ") + 2) : "";
+      if (title && openRowMenu(title)) match = nodes(api.tree, node => node.props?.["aria-label"] === label)[0];
+    }
+    if (!match) throw new Error("Control not found: " + label);
+    return match;
+  };
   const api = {
-    get tree() { return [panelHost.tree, dialogHost?.tree]; },
+    get tree() { return [panelHost.tree, dialogHost?.tree, menuHost?.tree]; },
+    openRowMenu(title) { return openRowMenu(title); },
+    /** Open the row's right-click menu and return the menu button with the given text. */
+    rowButton(id, label) { const title = list.byId[id]?.displayTitle || id; if (!openRowMenu(title)) return undefined; return nodes(api.tree, n => n.type === "button" && text(n) === label)[0]; },
+    /** Left-click a session row (opens it, or toggles its checkbox in batch mode). */
+    clickRow(id, event = {}) { const row = nodes(panelHost.tree, n => n.props?.["data-session-id"] === id)[0]; if (!row) throw new Error("Row not found: " + id); row.props.onClick({ defaultPrevented: false, ...event }); return api.flush(); },
+    get menuOpen() { return Boolean(menuHost); },
     get footerTree() { return footerHost.tree; },
     get headerTree() { return headerHost?.tree; },
     get registered() { return registered; },
@@ -446,6 +479,7 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
         if (panelHost.dirty) panelHost.render();
         if (headerHost?.dirty) headerHost.render();
         if (footerHost?.dirty) footerHost.render();
+        syncMenu();
         const child = nodes([panelHost.tree, headerHost?.tree], node => node.type?.name === "AnnotationDialog")[0];
         if (!child) { dialogHost?.dispose(); dialogHost = undefined; dialogKey = undefined; }
         else if (!dialogHost || child.props.sessionId !== dialogKey) { dialogHost?.dispose(); dialogKey = child.props.sessionId; dialogHost = host(child.type, child.props); }
@@ -458,7 +492,7 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
     // observe prompt writes without relying on navigator.clipboard in the
     // runInNewContext sandbox.
     get clipboardWrites() { return clipboardStub.writes; },
-    control(label) { return control(api.tree, label); },
+    control(label) { return control(api.tree, label, true); },
     async change(label, value) { const item = api.control(label); if (item.props.disabled) throw new Error("Control is disabled: " + label); item.props.onChange({ target: { value, checked: value } }); return api.flush(); },
     async click(label) { const button = api.find(node => node.type === "button" && text(node) === label)[0]; if (!button) throw new Error("Button not found: " + label); if (button.props.disabled) throw new Error("Button is disabled: " + label); button.props.onClick(); return api.flush(); },
     async clickLabel(label) { const button = api.control(label); if (button.props.disabled) throw new Error("Button is disabled: " + label); button.props.onClick(); return api.flush(); },
@@ -548,7 +582,7 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
       return e;
     },
     setWindowDimensions(width, height) { if (width !== undefined) window.innerWidth = width; if (height !== undefined) window.innerHeight = height; },
-    dispose() { dialogHost?.dispose(); headerHost?.dispose(); panelHost.dispose(); footerHost.dispose(); for (const cleanup of pluginCleanup) cleanup(); },
+    dispose() { menuHost?.dispose(); dialogHost?.dispose(); headerHost?.dispose(); panelHost.dispose(); footerHost.dispose(); for (const cleanup of pluginCleanup) cleanup(); },
   };
   return api;
 }

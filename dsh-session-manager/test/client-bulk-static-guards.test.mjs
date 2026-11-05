@@ -78,7 +78,7 @@ test("bulk: SessionManagerPanel renders every bulk dialog as a sibling (z-index 
   assert.ok(allBulkDialogsRender > 0, "all bulk dialogs are declared next to the existing single-session dialogs");
   // Same Fragment return — the dialogs live alongside panelModal,
   // deleteDialog, moveDialog, migrateDialog, annotationDialog.
-  assert.match(SRC, /return h\(React\.Fragment, null, panelModal, annotationDialog, moveDialog, deleteDialog, migrateDialog, bulkPreviewDialog, bulkProgressDialog, bulkResultDialog, bulkTagDialog, bulkPriorityDialog, bulkMoveDialog, bulkPresetDialog, workspaceArchiveConfirmDialog\);/);
+  assert.match(SRC, /return h\(React\.Fragment, null, panelModal, ctxMenuNode, annotationDialog, moveDialog, deleteDialog, migrateDialog, bulkPreviewDialog, bulkProgressDialog, bulkResultDialog, bulkTagDialog, bulkPriorityDialog, bulkMoveDialog, bulkPresetDialog, workspaceArchiveConfirmDialog\);/);
 });
 
 test("bulk: refresh after a successful batch fans out to the three independent caches", () => {

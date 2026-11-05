@@ -866,8 +866,7 @@ test("workspace archive: session row displays '工作区已归档' badge left of
 
   try {
     // Attempt to click "取消归档"
-    const rowActions = nodes(row, n => n.props?.className === "sm-rowActions")[0];
-    const unarchiveBtn = nodes(rowActions, n => n.type === "button" && text(n) === "移出归档")[0];
+    const unarchiveBtn = app.rowButton("s1", "移出归档");
     assert.ok(unarchiveBtn, "unarchive button must exist on archived session");
 
     unarchiveBtn.props.onClick();
