@@ -1,0 +1,5 @@
+# dsh-model-effort-picker bundle patch: one insert row. The entry `name` must equal the
+# package name so the loader resolves index.js (host half) and serves ./client.
+- insert:
+    - id: model-effort-picker
+      name: 'dsh-model-effort-picker'
