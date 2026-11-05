@@ -16,7 +16,7 @@ test("dialog opacity: defaults to 100% and publishes the CSS variable on load", 
   const { updateStore } = harness.exports;
 
   assert.equal(updateStore.getDialogOpacity(), 100, "default dialog opacity must be 100");
-  assert.equal(updateStore.DIALOG_OPACITY.min, 50);
+  assert.equal(updateStore.DIALOG_OPACITY.min, 0);
   assert.equal(updateStore.DIALOG_OPACITY.max, 100);
   assert.equal(updateStore.DIALOG_OPACITY.step, 5);
   assert.equal(harness.localStorage.getItem(STORAGE_KEY), null, "the default must not write storage");
@@ -51,7 +51,7 @@ test("dialog opacity: setDialogOpacity persists to localStorage and updates the 
   harness.dispose();
 });
 
-test("dialog opacity: values are clamped to 50..100 and snapped to the 5% step", () => {
+test("dialog opacity: values are clamped to 0..100 and snapped to the 5% step", () => {
   const harness = mountClient();
   const { updateStore } = harness.exports;
 
@@ -95,7 +95,7 @@ test("dialog opacity: resetDialogOpacity restores 100%", () => {
 // 2. Settings card UI
 // =========================================================================
 
-test("dialog opacity: settings card renders a 50..100 slider at 5% steps showing the current value", () => {
+test("dialog opacity: settings card renders a 0..100 slider at 5% steps showing the current value", () => {
   const harness = mountClient();
   const { SessionManagerSettingsCard } = harness.exports;
 
@@ -104,7 +104,7 @@ test("dialog opacity: settings card renders a 50..100 slider at 5% steps showing
     .find(node => node.props?.["aria-label"] === harness.t("settings.dialogOpacity"));
 
   assert.ok(slider, "the dialog-opacity slider must be present in the settings card");
-  assert.equal(slider.props.min, 50);
+  assert.equal(slider.props.min, 0);
   assert.equal(slider.props.max, 100);
   assert.equal(slider.props.step, 5);
   assert.equal(slider.props.value, 100, "slider starts at the default 100%");

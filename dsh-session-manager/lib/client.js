@@ -954,6 +954,7 @@ function isTopmostDialog(z) {
       // ── Home-page layout (OpenCode style): full-window page below the title bar,
       // search on top, project list on the left, time-grouped sessions on the right.
       // Scoped to .sm-ocPanel so the annotation surface (also .sm-panelDialog) is untouched.
+      "html[data-sm-translucent] .sm-nativeDialog,html[data-sm-translucent] .sm-panelDialog,html[data-sm-translucent] .sm-migrateDialog,html[data-sm-translucent] .sm-settingsCard{-webkit-backdrop-filter:blur(24px) saturate(1.15);backdrop-filter:blur(24px) saturate(1.15)}",
       ".sm-panelDialog.sm-ocPanel{--sm-dialog-surface:var(--dsw-alias-bg-base,var(--dsw-alias-bg-layer-1,#1f1f23));position:fixed!important;inset:var(--dsh-windows-titlebar-height,0px) 0 0 0!important;margin:0!important;width:auto!important;height:auto!important;max-width:none!important;max-height:none!important;border:0!important;border-radius:0!important;box-shadow:none!important}",
       "html[data-windows-titlebar] .sm-panelDialog.sm-ocPanel{border-radius:14px 14px 0 0!important}",
       ".sm-panelDialog.sm-ocPanel .sm-nativeDialogHeader{border-bottom:0!important;min-height:40px!important;padding:6px 14px!important;background:transparent}",
@@ -1066,7 +1067,7 @@ function isTopmostDialog(z) {
     // <html>; the CSS rules above turn it into the alpha channel of the dialog
     // fill only, leaving text, buttons, inputs, borders and hover states
     // opaque.
-    const SM_DIALOG_OPACITY = { min: 50, max: 100, step: 5, default: 100 };
+    const SM_DIALOG_OPACITY = { min: 0, max: 100, step: 5, default: 100 };
     const SM_DIALOG_OPACITY_KEY = "dsh-session-manager-dialog-opacity";
     const SM_DIALOG_OPACITY_VAR = "--sm-dialog-opacity";
     function smNormalizeDialogOpacity(value) {
@@ -1092,6 +1093,12 @@ function isTopmostDialog(z) {
       try {
         if (typeof document !== "undefined" && document.documentElement && document.documentElement.style) {
           document.documentElement.style.setProperty(SM_DIALOG_OPACITY_VAR, percent + "%");
+          // Translucent dialogs get a frosted-glass backdrop (see CSS) so whatever
+          // sits behind them stays unreadable noise instead of fighting the text.
+          if (typeof document.documentElement.setAttribute === "function") {
+            if (percent < 100) document.documentElement.setAttribute("data-sm-translucent", "");
+            else document.documentElement.removeAttribute("data-sm-translucent");
+          }
         }
       } catch (_) { /* ignore */ }
       return percent;
