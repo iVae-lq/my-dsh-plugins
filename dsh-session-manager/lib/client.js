@@ -259,6 +259,17 @@ function isTopmostDialog(z) {
       "panel.running": "运行中",
       "panel.current": "当前",
       "panel.session.new": "新建会话",
+      "oc.projects": "项目",
+      "oc.allProjects": "全部会话",
+      "oc.addProject": "添加项目",
+      "oc.newSession": "新建会话",
+      "oc.searchPlaceholder": "搜索会话",
+      "oc.group.today": "今天",
+      "oc.group.yesterday": "昨天",
+      "oc.group.week": "最近 7 天",
+      "oc.group.earlier": "更早",
+      "oc.openInTab": "已在标签页打开",
+      "oc.shortcut.label": "打开会话管理",
       "panel.close": "关闭",
       "row.open": "打开",
       "row.archive": "归档",
@@ -611,6 +622,17 @@ function isTopmostDialog(z) {
       "panel.running": "Running",
       "panel.current": "Current",
       "panel.session.new": "New session",
+      "oc.projects": "Projects",
+      "oc.allProjects": "All sessions",
+      "oc.addProject": "Add project",
+      "oc.newSession": "New session",
+      "oc.searchPlaceholder": "Search sessions",
+      "oc.group.today": "Today",
+      "oc.group.yesterday": "Yesterday",
+      "oc.group.week": "Last 7 days",
+      "oc.group.earlier": "Earlier",
+      "oc.openInTab": "Open in a tab",
+      "oc.shortcut.label": "Open session manager",
       "panel.close": "Close",
       "row.open": "Open",
       "row.archive": "Archive",
@@ -929,6 +951,52 @@ function isTopmostDialog(z) {
       "@media(max-width:720px){.sm-wsFilters .sm-markFiltersSpacer{display:none}.sm-wsFilters .sm-wsFiltersBulk{width:100%}}",
       ".sm-visuallyHidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}",
       "@media(max-width:720px){.sm-panelSelects{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.sm-panelDialog .sm-row{flex-wrap:wrap}.sm-panelDialog .sm-rowMain{flex-basis:100%}.sm-panelDialog .sm-rowActions{width:100%;min-width:0;flex:1 1 100%;justify-content:flex-start}}@media(max-width:540px){.sm-panelSelects{grid-template-columns:minmax(0,1fr)}}",
+      // ── Home-page layout (OpenCode style): full-window page below the title bar,
+      // search on top, project list on the left, time-grouped sessions on the right.
+      // Scoped to .sm-ocPanel so the annotation surface (also .sm-panelDialog) is untouched.
+      ".sm-panelDialog.sm-ocPanel{--sm-dialog-surface:var(--dsw-alias-bg-base,var(--dsw-alias-bg-layer-1,#1f1f23));position:fixed!important;inset:var(--dsh-windows-titlebar-height,0px) 0 0 0!important;margin:0!important;width:auto!important;height:auto!important;max-width:none!important;max-height:none!important;border:0!important;border-radius:0!important;box-shadow:none!important}",
+      "html[data-windows-titlebar] .sm-panelDialog.sm-ocPanel{border-radius:14px 14px 0 0!important}",
+      ".sm-panelDialog.sm-ocPanel .sm-nativeDialogHeader{border-bottom:0!important;min-height:40px!important;padding:6px 14px!important;background:transparent}",
+      ".sm-panelDialog.sm-ocPanel .sm-panel{display:flex;flex-direction:column;gap:0!important;padding:0!important;min-width:0!important;min-height:0;max-height:none!important;overflow:hidden!important;flex:1 1 auto}",
+      ".sm-ocWrap{box-sizing:border-box;width:100%;max-width:1060px;height:100%;min-height:0;margin:0 auto;padding:24px 32px 0;display:grid;grid-template-columns:240px minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr);column-gap:48px}",
+      ".sm-ocNarrow{box-sizing:border-box;width:100%;max-width:880px;height:100%;min-height:0;margin:0 auto;padding:16px 32px 0;display:flex;flex-direction:column}",
+      ".sm-ocNarrow .sm-list{flex:1 1 auto;min-height:0}",
+      ".sm-ocSearch{grid-column:2;grid-row:1;position:relative;display:flex;align-items:center;margin-bottom:28px}",
+      ".sm-ocSearch svg{position:absolute;left:12px;color:var(--dsw-alias-label-tertiary);pointer-events:none}",
+      ".sm-ocSearch .sm-queryInput{height:36px;padding:0 12px 0 36px;border:0!important;border-radius:8px;background:var(--dsw-alias-bg-layer-2,rgba(128,128,128,.12));font-size:13px}",
+      ".sm-ocSide{grid-column:1;grid-row:2 / 4;min-height:0;min-width:0;display:flex;flex-direction:column;overflow:auto;scrollbar-width:thin}",
+      ".sm-ocSideHead{display:flex;align-items:center;justify-content:space-between;flex:none;height:28px;margin-bottom:8px;padding:0 2px;color:var(--dsw-alias-label-secondary);font-size:13px}",
+      ".sm-ocIconBtn,.sm-ocNew{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;border-radius:6px;font:inherit;font-size:13px;line-height:18px;transition:background .12s,color .12s}",
+      ".sm-ocIconBtn{width:28px;height:28px;padding:0}.sm-ocNew{height:28px;padding:0 8px}",
+      ".sm-ocIconBtn:hover,.sm-ocNew:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.sm-ocNew:disabled{opacity:.5;cursor:not-allowed}",
+      ".sm-ocProjects{display:flex;flex-direction:column;gap:4px;min-width:0}",
+      ".sm-ocProjectItem{display:flex;align-items:center;gap:10px;min-width:0;height:32px;padding:0 6px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:18px;text-align:left;cursor:pointer;transition:background .12s}",
+      ".sm-ocProjectItem:hover{background:var(--dsw-alias-interactive-bg-hover)}.sm-ocProjectItem.sm-on{background:var(--dsw-alias-bg-module-platform,var(--dsw-alias-interactive-bg-hover))}",
+      ".sm-ocProjectName{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+      ".sm-ocBadge{flex:none;width:16px;height:16px;border-radius:4px;display:inline-grid;place-items:center;background:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 38%,var(--dsw-alias-bg-base,#222));color:var(--dsw-alias-bg-base,#fff);font-size:10px;font-weight:700;line-height:1;text-transform:uppercase}",
+      ".sm-ocBadgeAll{background:transparent;color:var(--dsw-alias-label-secondary)}",
+      ".sm-ocMainHead{grid-column:2;grid-row:2;display:flex;justify-content:flex-end;align-items:center;height:28px;margin-bottom:8px}",
+      ".sm-ocMainBody{grid-column:2;grid-row:3;min-height:0;min-width:0;display:flex;flex-direction:column}",
+      ".sm-ocMainBody .sm-panelTools{padding:0 0 6px;gap:6px}",
+      ".sm-ocPanel .sm-panelSelects{grid-template-columns:repeat(3,minmax(0,1fr))}.sm-ocPanel .sm-ocWsField{display:none}",
+      ".sm-ocPanel .sm-ocList{flex:1 1 auto;min-height:0;gap:0;padding-bottom:24px;overflow:auto}",
+      ".sm-ocGroup{flex:none;padding:18px 8px 8px;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:18px}.sm-ocGroup:first-child{padding-top:8px}",
+      ".sm-panelDialog.sm-ocPanel .sm-row{position:relative;min-height:41px;padding:0 8px;gap:10px;border:0;border-radius:8px;align-items:center;background:transparent}",
+      ".sm-panelDialog.sm-ocPanel .sm-row:hover,.sm-panelDialog.sm-ocPanel .sm-row:focus-within{background:var(--dsw-alias-interactive-bg-hover)}",
+      ".sm-panelDialog.sm-ocPanel .sm-row.sm-rowCurrent{background:var(--dsw-alias-bg-module-platform,var(--dsw-alias-interactive-bg-hover))}",
+      ".sm-panelDialog.sm-ocPanel .sm-rowMain{flex:1 1 auto;flex-direction:row;align-items:center;gap:10px;min-width:0}",
+      ".sm-ocPanel .sm-rowTitle{flex:0 1 auto;min-width:0;font-size:13px;font-weight:600;line-height:20px}",
+      ".sm-ocProject{flex:0 1 auto;min-width:0;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary);font-weight:400}",
+      ".sm-ocPanel .sm-rowSecondary{flex:1 1 auto;min-width:0;justify-content:flex-end;gap:8px}",
+      ".sm-ocPanel .sm-rowBadges{flex:1 1 auto;justify-content:flex-end;flex-wrap:nowrap;overflow:hidden}",
+      ".sm-ocPanel .sm-priorityBadge.sm-priority-3{display:none}",
+      ".sm-ocPanel .sm-rowMeta{color:var(--dsw-alias-label-tertiary)}",
+      ".sm-ocPanel .sm-rowActions{position:absolute;right:6px;top:50%;transform:translateY(-50%);display:none;flex-wrap:nowrap;max-width:none;padding:2px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-base))}",
+      ".sm-ocPanel .sm-row:hover .sm-rowActions,.sm-ocPanel .sm-row:focus-within .sm-rowActions{display:flex}",
+      ".sm-ocPanel .sm-row:hover .sm-rowMeta,.sm-ocPanel .sm-row:focus-within .sm-rowMeta{visibility:hidden}",
+      ".sm-ocTabMark{position:absolute;left:0;top:11px;bottom:11px;width:2px;border-radius:1px;background:var(--dsw-alias-label-tertiary)}",
+      "@media(max-width:860px){.sm-ocWrap{grid-template-columns:minmax(0,1fr);padding:16px 16px 0}.sm-ocSide{display:none}.sm-ocSearch,.sm-ocMainHead,.sm-ocMainBody{grid-column:1}.sm-ocNarrow{padding:12px 16px 0}}",
+      "body:has(.sm-ocPanel) .sm-confirmDialog.sm-nativeDialogLayer:not(.sm-confirmDialog-anchored),body:has(.sm-ocPanel) .sm-bulkDialog.sm-nativeDialogLayer:not(.sm-bulkDialog-anchored),body:has(.sm-ocPanel) .sm-annotationDialog.sm-confirmDialog.sm-nativeDialogLayer:not(.sm-annotationDialog-anchored){inset:50% auto auto 50%!important;transform:translate(-50%,-50%)!important}",
     ].join("");
 
     // Auto-follow DSH's theme. We detect DSH's current theme from
@@ -4563,6 +4631,8 @@ function isTopmostDialog(z) {
       const onRemove = props.onRemove;
       const onMove = props.onMove;
       const onMigrate = props.onMigrate;
+      const onNewSession = props.onNewSession;
+      const onAddProject = props.onAddProject;
       const defaultUseSessions = (selector = s => s) => {
         const model = activeClientCtx?.sessions?.list;
         return useSyncExternalStore(
@@ -5118,9 +5188,63 @@ function isTopmostDialog(z) {
         setTagFilter("all");
         setPriorityFilter("all");
       };
+      // ── Home-page look (OpenCode style) helpers ───────────────────────────
+      // Project label for a session: its workspace title/name, else the cwd
+      // folder name. Used for the letter badge and the muted label after the title.
+      const workspaceById = useMemo(() => new Map(workspaces.map(workspace => [workspace.id, workspace])), [workspaces]);
+      const projectLabelOf = (session) => {
+        const memberships = rowWorkspaces(session, workspaceIndex);
+        for (const id of memberships) {
+          const workspace = workspaceById.get(id);
+          const label = workspace && (workspace.title || workspace.name || workspace.id);
+          if (label) return String(label);
+        }
+        return shortPath(session.cwd) || "";
+      };
+      // Sessions that currently have a tab in dsh-tab (soft coupling through its
+      // persisted view state; absent plugin => empty set).
+      const openTabIds = (() => {
+        try {
+          const raw = typeof localStorage !== "undefined" ? localStorage.getItem("dsh.tab.view.v2") : null;
+          const value = raw ? JSON.parse(raw) : null;
+          return new Set(Array.isArray(value?.tabs) ? value.tabs.filter(id => typeof id === "string") : []);
+        } catch (_) {
+          return new Set();
+        }
+      })();
+      const timeGroupOf = (session) => {
+        const time = sortOrder.startsWith("created-")
+          ? (sessionTime(session.createdAt) ?? sessionTime(createdTimes[session.id]))
+          : (sessionTime(session.updatedAt) ?? sessionTime(updatedTimes[session.id]));
+        if (time === null) return { key: "earlier", label: t("oc.group.earlier") };
+        const startOfToday = new Date(now);
+        startOfToday.setHours(0, 0, 0, 0);
+        const dayMs = 86400000;
+        if (time >= startOfToday.getTime()) return { key: "today", label: t("oc.group.today") };
+        if (time >= startOfToday.getTime() - dayMs) return { key: "yesterday", label: t("oc.group.yesterday") };
+        if (time >= startOfToday.getTime() - 6 * dayMs) return { key: "week", label: t("oc.group.week") };
+        return { key: "earlier", label: t("oc.group.earlier") };
+      };
+      const hasUngroupedRows = allRows.some(session => rowWorkspaces(session, workspaceIndex).size === 0);
+      const renderProjectItem = (value, label, title) => h("button", {
+        key: value,
+        type: "button",
+        className: "sm-ocProjectItem" + (workspaceFilter === value ? " sm-on" : "") + (value === "all" ? " sm-ocProjectAll" : ""),
+        "aria-pressed": workspaceFilter === value,
+        title: title || label,
+        onClick: () => setWorkspaceFilter(value)
+      },
+        value === "all"
+          ? h("span", { className: "sm-ocBadge sm-ocBadgeAll", "aria-hidden": "true" },
+              h("svg", { viewBox: "0 0 16 16", width: 12, height: 12, fill: "none", stroke: "currentColor", strokeWidth: 1.4, strokeLinecap: "round", "aria-hidden": "true" }, h("path", { d: "M3 4.5h10M3 8h10M3 11.5h10" })))
+          : h("span", { className: "sm-ocBadge", "aria-hidden": "true" }, String(label || "?").trim().charAt(0).toUpperCase() || "?"),
+        h("span", { className: "sm-ocProjectName" }, label)
+      );
       const renderRow = (s, rank) => {
         const isArchived = archived.has(s.id);
         const isCurrent = s.id === list.current;
+        const projectLabel = projectLabelOf(s);
+        const isTabOpen = openTabIds.has(s.id);
         const busy = busyId === s.id;
         const mark = annotationOf(annotations, s.id);
         const isSelected = selectedIds.has(s.id);
@@ -5139,12 +5263,15 @@ function isTopmostDialog(z) {
         return h("div", {
           key: s.id,
           "data-session-id": s.id,
-          className: "sm-row" + (isCurrent ? " sm-rowCurrent" : "") + (isSelected ? " sm-rowBulkSelected" : "")
+          className: "sm-row" + (isCurrent ? " sm-rowCurrent" : "") + (isSelected ? " sm-rowBulkSelected" : "") + (isTabOpen ? " sm-rowTabOpen" : "")
         },
           h("div", { className: "sm-rowCheckboxSlot" + ((selectedIds.size > 0 || selectModeEnabled) ? " sm-rowCheckboxSlot-visible" : "") }, checkbox),
+          isTabOpen ? h("span", { className: "sm-ocTabMark", title: t("oc.openInTab"), "aria-label": t("oc.openInTab") }) : null,
+          h("span", { className: "sm-ocBadge", "aria-hidden": "true" }, (projectLabel || (s.displayTitle || s.id || "?")).trim().charAt(0).toUpperCase() || "?"),
           h("div", { className: "sm-rowMain" },
             h("div", { className: "sm-rowTitle" },
               h("span", null, s.blank ? t("panel.session.new") : (s.displayTitle || s.id)),
+              projectLabel ? h("span", { className: "sm-ocProject", title: s.cwd || projectLabel }, projectLabel) : null,
               isWsArchived ? h("span", { className: "sm-badge sm-badgeWorkspaceArchived" }, t("panel.workspaceArchived")) : null,
               isArchived ? h("span", { className: "sm-badge sm-badgeArchived" }, t("panel.archived")) : null,
               s.running ? h("span", { className: "sm-badge sm-badgeRunning" }, t("panel.running")) : null,
@@ -5157,7 +5284,7 @@ function isTopmostDialog(z) {
                 mark.tags.length > 2 ? h("span", { title: mark.tags.join(", ") }, "+" + (mark.tags.length - 2)) : null,
                 mark.note ? h("button", { type: "button", className: "sm-noteBadge", title: t("marks.note.exists"), onClick: () => { setAnnotationAnchor(null); setAnnotationFor(current => current?.id === s.id ? null : s); } }, "✎") : null
               ),
-              h("div", { className: "sm-rowMeta" }, shortPath(s.cwd) + (s.cwd ? " · " : "") + formatRelative(s.updatedAt, now)),
+              h("div", { className: "sm-rowMeta", title: s.cwd || undefined }, formatRelative(s.updatedAt, now)),
               h("div", { className: "sm-rowActions" },
                 h("button", { type: "button", className: "sm-rowBtn", disabled: busy, onClick: () => { if (isArchived) { if (isWsArchived) { if (typeof window !== "undefined" && typeof window.alert === "function") { window.alert(t("error.workspaceArchived")); } return; } /* DSH refuses to surface an archived session as the current view: clicking "Open" on an archived row flashes an empty chat panel and bounces back to "no session selected". Unarchive first, then open. (issue #17.4) */ runRow(s.id, async () => { await onUnarchive(s.id); await onOpen(s.id); }); } else { onOpen(s.id); } } }, t("row.open")),
                 renderTip(t(isArchived ? "row.unarchive" : "row.archive"), h("button", {
@@ -5210,7 +5337,23 @@ function isTopmostDialog(z) {
       };
       const rowsList = rows.length === 0
         ? h("div", { className: "sm-empty" }, allRows.length > 0 ? t("panel.empty.filtered") : filter === "archived" ? t("panel.empty.archived") : t("panel.empty"))
-        : h("div", { className: "sm-list" }, rows.map((s, i) => renderRow(s, i)));
+        : h("div", { className: "sm-list sm-ocList" }, (() => {
+          // Time-sorted views are grouped under Today / Yesterday / Last 7 days /
+          // Earlier headings; other sorts (name, priority) stay a flat list.
+          const grouped = sortOrder.startsWith("updated-") || sortOrder.startsWith("created-");
+          if (!grouped) return rows.map((s, i) => renderRow(s, i));
+          const nodes = [];
+          let lastKey = null;
+          rows.forEach((s, i) => {
+            const group = timeGroupOf(s);
+            if (group.key !== lastKey) {
+              lastKey = group.key;
+              nodes.push(h("div", { key: "group:" + group.key + ":" + i, className: "sm-ocGroup" }, group.label));
+            }
+            nodes.push(renderRow(s, i));
+          });
+          return nodes;
+        })());
 
       const allWorkspaceRows = useMemo(() => {
         const hasSessionList = Array.isArray(list?.ids);
@@ -5592,7 +5735,7 @@ function isTopmostDialog(z) {
         },
         h("section", {
           ref: panelRef,
-          className: "sm-nativeDialog sm-panelDialog",
+          className: "sm-nativeDialog sm-panelDialog sm-ocPanel",
           role: "dialog",
           "aria-modal": "true",
           "aria-labelledby": "sm-panel-dialog-title"
@@ -5685,7 +5828,7 @@ function isTopmostDialog(z) {
             )
           ),
           h("div", { className: "sm-panel" },
-            panelTab === "workspaces" ? h(React.Fragment, null,
+            panelTab === "workspaces" ? h("div", { className: "sm-ocNarrow" },
               h("div", { className: "sm-panelTools" },
                 h("input", {
                   type: "search", className: "sm-queryInput", value: wsQuery,
@@ -5782,15 +5925,51 @@ function isTopmostDialog(z) {
               ),
               error ? h("div", { className: "sm-error", role: "alert" }, t("error.operation", { message: error })) : null,
               workspaceRowsList
-            ) : h(React.Fragment, null,
-              h("div", { className: "sm-panelTools" },
+            ) : h("div", { className: "sm-ocWrap" },
+              h("div", { className: "sm-ocSearch" },
+                h("svg", { viewBox: "0 0 16 16", width: 16, height: 16, fill: "none", stroke: "currentColor", strokeWidth: 1.3, strokeLinecap: "round", "aria-hidden": "true" },
+                  h("circle", { cx: 7, cy: 7, r: 4.6 }), h("path", { d: "m10.5 10.5 3 3" })),
                 h("input", {
                   type: "search", className: "sm-queryInput", value: query,
-                  placeholder: t("panel.search"), "aria-label": t("panel.search"), autoComplete: "off",
+                  placeholder: t("oc.searchPlaceholder"), title: t("panel.search"), "aria-label": t("panel.search"), autoComplete: "off",
                   onChange: event => setQuery(event.target.value)
-                }),
+                })
+              ),
+              h("aside", { className: "sm-ocSide" },
+                h("div", { className: "sm-ocSideHead" },
+                  h("span", null, t("oc.projects")),
+                  typeof onAddProject === "function" ? renderTip(t("oc.addProject"), h("button", {
+                    type: "button", className: "sm-ocIconBtn", "aria-label": t("oc.addProject"),
+                    onClick: () => {
+                      Promise.resolve().then(() => onAddProject()).then(() => setWorkspaceRefresh(value => value + 1))
+                        .catch(err => setError(err instanceof Error ? err.message : String(err)));
+                    }
+                  }, h("svg", { viewBox: "0 0 16 16", width: 16, height: 16, fill: "none", stroke: "currentColor", strokeWidth: 1.2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" },
+                    h("path", { d: "M8.5 13H3.2c-.7 0-1.2-.5-1.2-1.2V4.2C2 3.5 2.5 3 3.2 3h2.6l1.2 1.4h4.8c.7 0 1.2.5 1.2 1.2V8" }),
+                    h("path", { d: "M12.5 10v4M10.5 12h4" })))) : null
+                ),
+                h("div", { className: "sm-ocProjects" },
+                  renderProjectItem("all", t("oc.allProjects")),
+                  workspaces
+                    .filter(workspace => !workspaceArchiveStore.isArchived(workspace.id) || workspaceFilter === workspaceValue(workspace.id))
+                    .map(workspace => renderProjectItem(workspaceValue(workspace.id), workspace.title || workspace.name || workspace.id, workspace.path)),
+                  hasUngroupedRows ? renderProjectItem("ungrouped", t("panel.workspace.ungrouped")) : null
+                )
+              ),
+              h("div", { className: "sm-ocMainHead" },
+                h("button", {
+                  type: "button", className: "sm-ocNew", disabled: typeof onNewSession !== "function",
+                  onClick: () => onNewSession && onNewSession(workspaceFilter.startsWith("workspace:") ? workspaceFilter.slice("workspace:".length) : undefined)
+                },
+                  h("svg", { viewBox: "0 0 16 16", width: 14, height: 14, fill: "none", stroke: "currentColor", strokeWidth: 1.2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" },
+                    h("path", { d: "M7 3H3.8C3.4 3 3 3.4 3 3.8v8.4c0 .4.4.8.8.8h8.4c.4 0 .8-.4.8-.8V9" }),
+                    h("path", { d: "M12.2 2.4a1.2 1.2 0 0 1 1.7 1.7L8.2 9.8 6 10.2l.4-2.2 5.8-5.6Z" })),
+                  t("oc.newSession"))
+              ),
+              h("div", { className: "sm-ocMainBody" },
+              h("div", { className: "sm-panelTools" },
                 h("div", { className: "sm-panelSelects" },
-                  h("div", { className: "sm-viewField" },
+                  h("div", { className: "sm-viewField sm-ocWsField" },
                     h("span", null, t("panel.workspace")),
                     h("select", {
                       className: "sm-viewSelect", "aria-label": t("panel.workspace"), value: workspaceFilter,
@@ -5885,6 +6064,7 @@ function isTopmostDialog(z) {
                 onOpenPresetDialog: onBulkPreset
               }) : null,
               rowsList
+              )
             )
           )
         )
@@ -6562,7 +6742,9 @@ function isTopmostDialog(z) {
           onUnarchive: this.props.props?.onUnarchive,
           onRemove: this.props.props?.onRemove,
           onMove: this.props.props?.onMove,
-          onMigrate: this.props.props?.onMigrate
+          onMigrate: this.props.props?.onMigrate,
+          onNewSession: (workspaceId) => { try { this.props.panelStore.set(false); this.props.props?.onNewSession?.(workspaceId); } catch (_) {} },
+          onAddProject: this.props.props?.onAddProject
         });
       }
     }
@@ -7209,6 +7391,28 @@ function isTopmostDialog(z) {
           }, 250);
         },
         onOpenPanel: () => panelStore.toggle(),
+        // Session-manager home page: "New session" (optionally inside a project)
+        // and "Add project" (pick a directory and register it as a workspace).
+        onNewSession: (workspaceId) => {
+          const uiWorkspace = ctx.uiWorkspace;
+          try {
+            if (typeof ctx.layout?.selectPanel === "function") { try { ctx.layout.selectPanel(null); } catch (_) {} }
+            if (uiWorkspace && typeof uiWorkspace.startSession === "function") {
+              if (typeof workspaceId === "string" && workspaceId) uiWorkspace.startSession(workspaceId);
+              else uiWorkspace.startSession();
+            }
+          } catch (error) {
+            console.error("session-manager: new session failed", error);
+          }
+        },
+        onAddProject: async () => {
+          const uiWorkspace = ctx.uiWorkspace;
+          if (!uiWorkspace || typeof uiWorkspace.pickDirectory !== "function") return;
+          const path = await uiWorkspace.pickDirectory();
+          if (typeof path !== "string" || !path) return;
+          if (typeof ctx.workspaces?.create === "function") await ctx.workspaces.create({ path });
+          try { await ctx.workspaces?.refresh?.(); } catch (_) {}
+        },
         onBulkRefresh: async (action, meta) => {
           const currentBefore = getCurrentSessionId();
           if (action === "delete" || action === "archive") {
@@ -7338,6 +7542,47 @@ function isTopmostDialog(z) {
           try { if (typeof off === "function") off(); } catch (_) {}
         };
       }, "session-manager: custom select popups");
+
+      // Keyboard shortcut that toggles the session manager home page.
+      // Default: Ctrl+Shift+S on desktop, Ctrl+Alt+S in the browser (DSH only allows
+      // modifier combinations the browser does not reserve); rebindable under
+      // DSH Settings -> Shortcuts. The shortcut service is adopted dynamically (not
+      // through the static `inject` list) so a host without it only loses the hotkey.
+      let shortcutAdopted = false;
+      const adoptShortcuts = (service) => {
+        if (shortcutAdopted || !service || typeof service.register !== "function") return;
+        shortcutAdopted = true;
+        ctx.effect(() => service.register({
+          id: "session-manager.toggle",
+          label: () => {
+            try { return ctx.locale.bind(NS)("oc.shortcut.label"); } catch (_) { return "Open session manager"; }
+          },
+          aliases: ["session manager", "sessions", "open sessions"],
+          defaults: {
+            "desktop:macos": { code: "KeyS", modifiers: ["primary", "shift"] },
+            "desktop:windows": { code: "KeyS", modifiers: ["primary", "shift"] },
+            "desktop:linux": { code: "KeyS", modifiers: ["primary", "shift"] },
+            "web:macos": { code: "KeyS", modifiers: ["primary", "alt"] },
+            "web:windows": { code: "KeyS", modifiers: ["primary", "alt"] }
+          },
+          regions: ["page", "editable"],
+          modals: [],
+          resolve: () => ({ status: "handled", run: () => panelStore.toggle() })
+        }), "session-manager: toggle shortcut");
+      };
+      try {
+        const direct = typeof ctx.get === "function" ? ctx.get("shortcuts") : undefined;
+        if (direct) adoptShortcuts(direct);
+      } catch (_) { /* fall through to the injected path */ }
+      if (!shortcutAdopted && typeof ctx.inject === "function") {
+        try {
+          ctx.inject(["shortcuts"], (scoped) => {
+            adoptShortcuts((scoped && typeof scoped.get === "function" ? scoped.get("shortcuts") : undefined) || (scoped && scoped.shortcuts));
+          });
+        } catch (error) {
+          console.warn("session-manager: shortcut service unavailable", error);
+        }
+      }
 
       // Keep <html data-sm-theme> in step with DSH through the official theme
       // event. ui-layout's ThemePresenter subscribes to the same event and
