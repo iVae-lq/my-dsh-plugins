@@ -112,7 +112,7 @@ test("the header menu joins the dialog surface rules: opacity fill, theme fallba
   // One shared definition, not a copy: the menu is listed in the same rules as the dialogs.
   assert.match(SRC, /"\.sm-presetMenu,\.sm-nativeDialog,\.sm-panelDialog,\.sm-migrateDialog,\.sm-settingsCard\{--sm-dialog-surface:[^}]*--sm-dialog-fill:color-mix\(in srgb,var\(--sm-dialog-surface\) var\(--sm-dialog-opacity,100%\),transparent\)\}"/);
   assert.match(SRC, /\[data-sm-theme=dark\] \.sm-presetMenu,\[data-sm-theme=dark\] \.sm-nativeDialog[^{]*\{--sm-dialog-surface-fallback:#1f1f23\}/);
-  assert.match(SRC, /html\[data-sm-translucent\] \.sm-presetMenu,html\[data-sm-translucent\] \.sm-nativeDialog[^{]*\{[^}]*backdrop-filter:blur\(var\(--sm-glass-blur,24px\)\)/);
+  assert.match(SRC, /html\[data-sm-translucent\] \.sm-presetMenu,html\[data-sm-translucent\] \.sm-nativeDialog[^{]*\{[^}]*backdrop-filter:blur\(var\(--sm-glass-blur,12px\)\)/);
   assert.match(SRC, /"\.sm-presetMenu\{position:fixed;[^"]*background:var\(--sm-dialog-fill\)/);
 });
 

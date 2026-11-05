@@ -8,7 +8,11 @@ All notable changes to this project will be documented in this file.
 - **feat(ui)**: The session header's agent-preset label is clickable. A chip registered at the shipped label's slot id (`agent-preset`, lower priority) opens a preset menu and switches through the same `/preset-migrate` path as the panel; disabling the plugin restores the shipped label. The menu is portaled to the overlay root and joins the dialog-surface rules, so the "Dialog opacity" slider and the frosted-glass blur apply to it.
 - **feat(ui)**: Preset pickers show each preset's localized name, its id and its description instead of a bare id: the header menu, the panel's "Migrate preset" dialog (radio list with a "Current" badge, replacing the id `<select>`) and bulk "Migrate preset". Presets that failed to load are disabled with the reason; a current preset that no longer exists is flagged. Hosts without `/presets` fall back to the scanned ids.
 - **feat(api)**: `GET /presets` returns preset display metadata without reading session artifacts.
-- **test**: Live rebind, busy refusal, lagging-Agent rebind, failed-rebind safety, `/presets`, the header chip and menu surface, and the preset choice lists (`client-header-preset-switch.test.mjs`).
+- **feat(shortcut)**: The default "Open session manager" shortcut is `Ctrl+S` (`⌘S` on macOS) in the desktop app. The browser keeps `Ctrl+Alt+S`, because DSH's Web profiles reject a bare `Mod+S` default at registration. Existing user bindings are untouched.
+- **feat(settings)**: A "Sidebar entry" switch shows or hides the left-sidebar "Sessions & Workspaces" entry; hiding it keeps the panel (and its shortcut) working. The entry shows the shortcut actually in effect, read from DSH's shortcut catalog, and updates on rebinding; an unbound or conflicting binding shows nothing.
+- **change(settings)**: Dialog opacity defaults to 25% and the frosted-glass blur to 12px. Stored preferences are kept; the CSS-level fallback stays opaque in case the script fails to load.
+- **fix(ui)**: The Workspaces page search uses the same field as the Sessions page (search icon, filled input).
+- **test**: Live rebind, busy refusal, lagging-Agent rebind, failed-rebind safety, `/presets`, the header chip and menu surface, the preset choice lists (`client-header-preset-switch.test.mjs`), shortcut defaults, the sidebar shortcut hint, the sidebar entry switch and the shared search field (`client-sidebar-entry-shortcut.test.mjs`).
 
 ## 0.7.5 — 2026-10-22
 

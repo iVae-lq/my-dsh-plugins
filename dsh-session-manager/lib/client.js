@@ -223,6 +223,9 @@ function isTopmostDialog(z) {
       "settings.dialogOpacity.hint": "仅调整插件弹窗的背景透明度",
       "settings.dialogOpacity.value": "{value}%",
       "settings.dialogOpacity.reset": "恢复默认",
+      "settings.sidebarEntry": "左侧边栏入口",
+      "settings.sidebarEntry.hint": "在左侧边栏底部显示「会话与工作区」入口及其快捷键；隐藏后仍可用快捷键打开",
+      "settings.sidebarEntry.show": "显示",
       "settings.glass": "毛玻璃效果",
       "settings.glass.hint": "背景半透明时，对弹窗和会话管理页后方的内容做模糊",
       "settings.glass.enable": "启用",
@@ -543,6 +546,9 @@ function isTopmostDialog(z) {
       "settings.dialogOpacity.hint": "Adjusts dialog background opacity only",
       "settings.dialogOpacity.value": "{value}%",
       "settings.dialogOpacity.reset": "Reset to default",
+      "settings.sidebarEntry": "Sidebar entry",
+      "settings.sidebarEntry.hint": "Show the Sessions & workspaces entry and its shortcut at the bottom of the left sidebar; when hidden, open it with the shortcut",
+      "settings.sidebarEntry.show": "Show",
       "settings.glass": "Frosted glass",
       "settings.glass.hint": "Blur whatever is behind dialogs and the session manager page when the background is translucent",
       "settings.glass.enable": "Enabled",
@@ -973,6 +979,11 @@ function isTopmostDialog(z) {
       ".sm-footerBtn-rail{width:36px;height:36px;padding:0;justify-content:center;border-radius:12px;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border:0;display:inline-flex;align-items:center}",
       ".sm-footerBtn-rail:hover,.sm-footerBtn-rail:focus-visible{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}",
       ".sm-footerBtn-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;max-width:100%}",
+      // Effective shortcut after the label, right-aligned like a menu accelerator.
+      // Workspaces page search reuses the Sessions page field; inside the tool
+      // column it keeps the column's own spacing instead of the 24px gap.
+      ".sm-panelTools .sm-ocSearch.sm-wsSearch{margin-bottom:0}",
+      ".sm-footerBtn-shortcut{flex:none;margin-left:auto;padding:0 8px 0 6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);white-space:nowrap;font-variant-numeric:tabular-nums;letter-spacing:.02em}",
       ".sm-overlayLayer{position:fixed;inset:0;pointer-events:none}",
       ".sm-overlayLayer>*{pointer-events:auto}",
       ".sm-overlayBackdrop{position:fixed;inset:0;background:transparent;pointer-events:auto}",
@@ -1004,7 +1015,7 @@ function isTopmostDialog(z) {
       // Scoped to .sm-ocPanel so the annotation surface (also .sm-panelDialog) is untouched.
       // Every fill inside the page is a translucent neutral (--sm-oc-fill*) rather than an
       // opaque theme layer, so controls blend with any dialog opacity / glass setting.
-      "html[data-sm-translucent] .sm-presetMenu,html[data-sm-translucent] .sm-nativeDialog,html[data-sm-translucent] .sm-panelDialog,html[data-sm-translucent] .sm-migrateDialog,html[data-sm-translucent] .sm-settingsCard{-webkit-backdrop-filter:blur(var(--sm-glass-blur,24px)) saturate(1.15);backdrop-filter:blur(var(--sm-glass-blur,24px)) saturate(1.15)}",
+      "html[data-sm-translucent] .sm-presetMenu,html[data-sm-translucent] .sm-nativeDialog,html[data-sm-translucent] .sm-panelDialog,html[data-sm-translucent] .sm-migrateDialog,html[data-sm-translucent] .sm-settingsCard{-webkit-backdrop-filter:blur(var(--sm-glass-blur,12px)) saturate(1.15);backdrop-filter:blur(var(--sm-glass-blur,12px)) saturate(1.15)}",
       ".sm-panelDialog.sm-ocPanel{--sm-dialog-surface:var(--dsw-alias-bg-base,var(--dsw-alias-bg-layer-1,#1f1f23));--sm-oc-fill:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 6%,transparent);--sm-oc-fill-hover:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 10%,transparent);--sm-oc-fill-active:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 15%,transparent);--sm-oc-line:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 14%,transparent);position:fixed!important;inset:var(--dsh-windows-titlebar-height,0px) 0 0 0!important;margin:0!important;width:auto!important;height:auto!important;max-width:none!important;max-height:none!important;border:0!important;border-radius:0!important;box-shadow:none!important}",
       "html[data-windows-titlebar] .sm-panelDialog.sm-ocPanel{border-radius:14px 14px 0 0!important}",
       ".sm-panelDialog.sm-ocPanel .sm-nativeDialogHeader{border-bottom:0!important;min-height:44px!important;padding:6px 14px!important;background:transparent}",
@@ -1161,7 +1172,9 @@ function isTopmostDialog(z) {
     // <html>; the CSS rules above turn it into the alpha channel of the dialog
     // fill only, leaving text, buttons, inputs, borders and hover states
     // opaque.
-    const SM_DIALOG_OPACITY = { min: 0, max: 100, step: 5, default: 100 };
+    // Default 25%: dialogs start translucent (with the frosted-glass blur below);
+    // the CSS-level :root fallback stays 100% so a failed script load stays opaque.
+    const SM_DIALOG_OPACITY = { min: 0, max: 100, step: 5, default: 25 };
     const SM_DIALOG_OPACITY_KEY = "dsh-session-manager-dialog-opacity";
     const SM_DIALOG_OPACITY_VAR = "--sm-dialog-opacity";
     function smNormalizeDialogOpacity(value) {
@@ -1189,9 +1202,55 @@ function isTopmostDialog(z) {
       enabledKey: "dsh-session-manager-glass-enabled",
       blurKey: "dsh-session-manager-glass-blur",
       enabledDefault: true,
-      blur: { min: 0, max: 64, step: 2, default: 24 }
+      blur: { min: 0, max: 64, step: 2, default: 12 }
     };
     const SM_GLASS_BLUR_VAR = "--sm-glass-blur";
+    // "Sessions & workspaces" entry at the foot of DSH's left sidebar: shown by
+    // default; hiding it keeps the panel reachable through the shortcut and the
+    // title-bar button.
+    const SM_SIDEBAR_ENTRY_KEY = "dsh-session-manager-show-sidebar-entry";
+    function smReadShowSidebarEntry() {
+      try {
+        if (typeof localStorage !== "undefined") {
+          const raw = localStorage.getItem(SM_SIDEBAR_ENTRY_KEY);
+          if (raw === "0" || raw === "false") return false;
+        }
+      } catch (_) { /* storage unavailable: default */ }
+      return true;
+    }
+    // Effective binding of the "open session manager" shortcut, published from
+    // the DSH shortcut catalog for display next to the sidebar entry.
+    const SM_SHORTCUT_ID = "session-manager.toggle";
+    const SM_NO_SHORTCUT_HINT = Object.freeze({ text: "", aria: undefined });
+    const shortcutHintStore = (() => {
+      let value = SM_NO_SHORTCUT_HINT;
+      const listeners = new Set();
+      return {
+        get: () => value,
+        set(next) {
+          const normalized = next && typeof next.text === "string" ? next : SM_NO_SHORTCUT_HINT;
+          if (normalized.text === value.text && normalized.aria === value.aria) return;
+          value = normalized.text === "" ? SM_NO_SHORTCUT_HINT : normalized;
+          for (const listener of [...listeners]) { try { listener(); } catch (_) {} }
+        },
+        subscribe(listener) {
+          listeners.add(listener);
+          return () => { listeners.delete(listener); };
+        }
+      };
+    })();
+    /** Catalog keycaps to text: Windows ["Ctrl","+","S"] -> "Ctrl+S", macOS ["⌘","S"] -> "⌘S", chords keep a space. */
+    function smFormatShortcutKeys(keys) {
+      if (!Array.isArray(keys) || keys.length === 0) return "";
+      const plusSeparated = keys.includes("+");
+      let out = "";
+      keys.forEach((key, index) => {
+        const label = String(key);
+        if (index === 0 || label === "+" || keys[index - 1] === "+") out += label;
+        else out += (plusSeparated ? " " : "") + label;
+      });
+      return out;
+    }
     function smNormalizeGlassBlur(value) {
       const numeric = Number(value);
       if (!Number.isFinite(numeric)) return SM_GLASS.blur.default;
@@ -4800,6 +4859,19 @@ function isTopmostDialog(z) {
         smSyncGlass(smReadDialogOpacity());
         this._notify();
       },
+      // Left-sidebar entry visibility (the panel itself stays reachable).
+      SIDEBAR_ENTRY_KEY: SM_SIDEBAR_ENTRY_KEY,
+      getShowSidebarEntry() {
+        return smReadShowSidebarEntry();
+      },
+      setShowSidebarEntry(value) {
+        const show = value === true || value === "true" || value === 1 || value === "1";
+        try {
+          if (typeof localStorage !== "undefined") localStorage.setItem(SM_SIDEBAR_ENTRY_KEY, show ? "1" : "0");
+        } catch (_) {}
+        this._notify();
+        return show;
+      },
       REGISTRY_OPTIONS: {
         "registry.npmjs.org": "https://registry.npmjs.org",
         "registry.npmmirror.com": "https://registry.npmmirror.com",
@@ -6432,11 +6504,16 @@ function isTopmostDialog(z) {
           h("div", { className: "sm-panel" },
             panelTab === "workspaces" ? h("div", { className: "sm-ocNarrow" },
               h("div", { className: "sm-panelTools" },
-                h("input", {
-                  type: "search", className: "sm-queryInput", value: wsQuery,
-                  placeholder: t("workspace.search"), "aria-label": t("workspace.search"), autoComplete: "off",
-                  onChange: event => setWsQuery(event.target.value)
-                }),
+                // Same search field as the Sessions page (icon + filled input).
+                h("div", { className: "sm-ocSearch sm-wsSearch" },
+                  h("svg", { viewBox: "0 0 16 16", width: 16, height: 16, fill: "none", stroke: "currentColor", strokeWidth: 1.3, strokeLinecap: "round", "aria-hidden": "true" },
+                    h("circle", { cx: 7, cy: 7, r: 4.6 }), h("path", { d: "m10.5 10.5 3 3" })),
+                  h("input", {
+                    type: "search", className: "sm-queryInput", value: wsQuery,
+                    placeholder: t("workspace.search"), "aria-label": t("workspace.search"), autoComplete: "off",
+                    onChange: event => setWsQuery(event.target.value)
+                  })
+                ),
                 h("div", { className: "sm-markFilters sm-wsFilters" },
                   h("div", { className: "sm-markFiltersGroup" },
                     h("button", {
@@ -7381,22 +7458,33 @@ function isTopmostDialog(z) {
         () => updateStore.getSnapshot(),
         () => updateStore.getSnapshot()
       );
+      const shortcutHint = useSyncExternalStore(
+        (cb) => shortcutHintStore.subscribe(cb),
+        () => shortcutHintStore.get(),
+        () => shortcutHintStore.get()
+      );
       useEffect(() => {
         try { updateStore.checkRecentStatus().catch(() => {}); } catch (_) {}
       }, []);
+      // The entry can be hidden in Settings; this slot still hosts the panel and
+      // the update dialog, so only the button itself is dropped.
+      const showEntry = updateStore.getShowSidebarEntry();
       const btnClass = "sm-footerBtn" + (wide ? " sm-footerBtn-wide" : " sm-footerBtn-rail");
       const btnLabel = t("footer.aria");
+      const hintText = shortcutHint.text;
       return h(React.Fragment, null,
-        h("button", {
+        showEntry ? h("button", {
           type: "button",
           className: btnClass,
           "aria-label": btnLabel,
-          title: wide ? undefined : btnLabel,
+          "aria-keyshortcuts": shortcutHint.aria,
+          title: hintText ? btnLabel + " (" + hintText + ")" : (wide ? undefined : btnLabel),
           onClick: () => onOpenPanel()
         },
           h(P.IconArchiveOutlineRegular, { size: wide ? 14 : 18 }),
-          wide ? h("span", { className: "sm-footerBtn-label" }, t("footer.label")) : null
-        ),
+          wide ? h("span", { className: "sm-footerBtn-label" }, t("footer.label")) : null,
+          wide && hintText ? h("span", { className: "sm-footerBtn-shortcut", "aria-hidden": "true" }, hintText) : null
+        ) : null,
         open ? h(SafePanel, {
           key: "sm-safe-panel",
           panelStore: panelStore,
@@ -7682,6 +7770,7 @@ function isTopmostDialog(z) {
       };
       const glassEnabled = updateStore.getGlassEnabled();
       const glassBlur = updateStore.getGlassBlur();
+      const showSidebarEntry = updateStore.getShowSidebarEntry();
 
       useEffect(() => {
         try { updateStore.checkRecentStatus().catch(() => {}); } catch (_) {}
@@ -7782,6 +7871,21 @@ function isTopmostDialog(z) {
               h("option", { value: "registry.npmjs.org" }, t("settings.registry.npm")),
               h("option", { value: "registry.npmmirror.com" }, t("settings.registry.china")),
               h("option", { value: "127.0.0.1:4873" }, t("settings.registry.local"))
+            )
+          ),
+          h("div", { className: "sm-settingsRow" },
+            h("div", { className: "sm-settingsRowLeft" },
+              h("span", null, t("settings.sidebarEntry")),
+              h("span", { className: "sm-settingsHint sm-settingsHintInline" }, t("settings.sidebarEntry.hint"))
+            ),
+            h("label", { className: "sm-settingsCheckbox" },
+              h("input", {
+                type: "checkbox",
+                checked: showSidebarEntry,
+                onChange: (e) => updateStore.setShowSidebarEntry(e.target.checked),
+                "aria-label": t("settings.sidebarEntry")
+              }),
+              h("span", null, t("settings.sidebarEntry.show"))
             )
           ),
           h("div", { className: "sm-settingsRow" },
@@ -8215,24 +8319,26 @@ function isTopmostDialog(z) {
       }, "session-manager: custom select popups");
 
       // Keyboard shortcut that toggles the session manager home page.
-      // Default: Ctrl+Shift+S on desktop, Ctrl+Alt+S in the browser (DSH only allows
-      // modifier combinations the browser does not reserve); rebindable under
-      // DSH Settings -> Shortcuts. The shortcut service is adopted dynamically (not
-      // through the static `inject` list) so a host without it only loses the hotkey.
+      // Default: Ctrl+S (Cmd+S on macOS) in the desktop app; the browser keeps
+      // Ctrl+Alt+S because DSH's Web profiles only admit Mod+Alt / Mod+Shift style
+      // combinations (a bare Mod+S default would be rejected at registration).
+      // Rebindable under DSH Settings -> Shortcuts. The shortcut service is adopted
+      // dynamically (not through the static `inject` list) so a host without it
+      // only loses the hotkey.
       let shortcutAdopted = false;
       const adoptShortcuts = (service) => {
         if (shortcutAdopted || !service || typeof service.register !== "function") return;
         shortcutAdopted = true;
         ctx.effect(() => service.register({
-          id: "session-manager.toggle",
+          id: SM_SHORTCUT_ID,
           label: () => {
             try { return ctx.locale.bind(NS)("oc.shortcut.label"); } catch (_) { return "Open session manager"; }
           },
           aliases: ["session manager", "sessions", "open sessions"],
           defaults: {
-            "desktop:macos": { code: "KeyS", modifiers: ["primary", "shift"] },
-            "desktop:windows": { code: "KeyS", modifiers: ["primary", "shift"] },
-            "desktop:linux": { code: "KeyS", modifiers: ["primary", "shift"] },
+            "desktop:macos": { code: "KeyS", modifiers: ["primary"] },
+            "desktop:windows": { code: "KeyS", modifiers: ["primary"] },
+            "desktop:linux": { code: "KeyS", modifiers: ["primary"] },
             "web:macos": { code: "KeyS", modifiers: ["primary", "alt"] },
             "web:windows": { code: "KeyS", modifiers: ["primary", "alt"] }
           },
@@ -8240,6 +8346,31 @@ function isTopmostDialog(z) {
           modals: [],
           resolve: () => ({ status: "handled", run: () => panelStore.toggle() })
         }), "session-manager: toggle shortcut");
+        // Publish the binding that is actually in effect (user override or
+        // default) for the sidebar entry. The catalog already carries the
+        // platform's keycaps; an unbound, conflicting or invalid binding shows
+        // nothing because it would not fire.
+        const catalog = service.catalog;
+        if (catalog && typeof catalog.getSnapshot === "function" && typeof catalog.subscribe === "function") {
+          ctx.effect(() => {
+            const publish = () => {
+              try {
+                const rows = catalog.getSnapshot();
+                const row = Array.isArray(rows) ? rows.find((entry) => entry && entry.id === SM_SHORTCUT_ID) : undefined;
+                const active = Boolean(row && row.binding && row.issue == null && !(Array.isArray(row.conflicts) && row.conflicts.length > 0));
+                shortcutHintStore.set(active
+                  ? { text: smFormatShortcutKeys(row.keys), aria: typeof row.aria === "string" ? row.aria : undefined }
+                  : SM_NO_SHORTCUT_HINT);
+              } catch (_) { /* keep the last published hint */ }
+            };
+            publish();
+            const off = catalog.subscribe(publish);
+            return () => {
+              try { if (typeof off === "function") off(); } catch (_) {}
+              shortcutHintStore.set(SM_NO_SHORTCUT_HINT);
+            };
+          }, "session-manager: shortcut hint");
+        }
       };
       try {
         const direct = typeof ctx.get === "function" ? ctx.get("shortcuts") : undefined;

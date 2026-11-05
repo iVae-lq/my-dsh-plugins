@@ -48,7 +48,8 @@ Verified with the official DSH Desktop client; see [5 Compatibility](#5-compatib
 - **Self-update check**: An **npm icon button** (Check for updates) in the session manager panel header checks for updates and displays a notification dot when a new version is available. Click to open the update dialog with current and latest versions, and one-click update via the DSH Plugin Manager with support for both HMR and non-HMR environments, persistent status tracking, automatic rollback on failure, and restart/refresh prompts.
 - **Settings Card**: Registered under DSH Settings (`settings.plugin.item`). Displays current version, latest version, inline check/update buttons, an auto-check toggle, and GitHub repository link.
 - **Install Source (Registry)**: Select between **npm official registry** (`registry.npmjs.org`, default) and **China mainland mirror** (`registry.npmmirror.com`) in the Settings Card. Check for updates and download packages directly from the selected registry.
-- **Dialog opacity**: A 50%–100% slider (5% steps, default 100%) with a "Reset to default" button in the Settings Card's preferences section. Adjusts the background fill opacity of plugin dialogs in real time while keeping text, buttons, inputs, tags, and borders fully opaque.
+- **Sidebar entry**: A switch in the Settings Card's preferences section shows or hides the "Sessions & Workspaces" entry at the bottom of the left sidebar (shown by default). The entry displays the shortcut that is actually in effect after its label and follows rebinding in DSH's Shortcuts settings; with the entry hidden, the shortcut still opens the session manager.
+- **Dialog opacity**: A 0%–100% slider (5% steps, default 25%) with a "Reset to default" button in the Settings Card's preferences section. Adjusts the background fill opacity of plugin dialogs in real time while keeping text, buttons, inputs, tags, and borders fully opaque. Frosted glass is on by default with a 12px blur.
 - **Theme**: Automatically follows the active DSH theme (including third-party theme plugins). Dialogs, settings cards, title-bar buttons, menus, inputs, and all other UI elements seamlessly adapt to light and dark themes.
 - **Unified dropdown styling**: All select dropdowns (sort, filter, priority) use unified shadow-free rounded custom floating menus matching active themes, strictly aligned with trigger widths, eliminating Chromium duplicate native popups.
 
@@ -72,7 +73,7 @@ DSH's read-only agent-preset label beside the title (e.g. "Standard mode" / "Cre
 
 ### 2.2 Sessions and workspaces management entry and interface
 
-Open **Sessions & Workspaces** from the bottom of DSH's sidebar to browse all sessions and workspaces: the session management tab supports switching workspaces, searching by title / ID / notes / tags, applying filters and sorting, and running **Open / Archive / Unarchive / Tags / Notes / Move / Migrate preset / Delete** on any session row; the workspace management tab supports searching, sorting, bulk actions, and visibility toggling.
+Open **Sessions & Workspaces** from the bottom of DSH's sidebar, or with the shortcut (`Ctrl+S` / `⌘S` in the desktop app, `Ctrl+Alt+S` in the browser; rebindable in DSH's Shortcuts settings), to browse all sessions and workspaces: the session management tab supports switching workspaces, searching by title / ID / notes / tags, applying filters and sorting, and running **Open / Archive / Unarchive / Tags / Notes / Move / Migrate preset / Delete** on any session row; the workspace management tab supports searching, sorting, bulk actions, and visibility toggling.
 
 ### 2.3 Bulk management
 

@@ -271,8 +271,8 @@ test("theme: each UI semantic reads the matching DSH token", () => {
   assert.match(SRC, /\.sm-annotationChecks \.sm-prioritySelectInline\{[^}]*color:var\(--dsw-alias-label-primary/);
 });
 
-test("theme: the dialog-opacity setting is unchanged (name, default, range, storage)", () => {
-  assert.match(SRC, /const SM_DIALOG_OPACITY = \{ min: 0, max: 100, step: 5, default: 100 \}/);
+test("theme: the dialog-opacity setting keeps its name, range and storage (default 25%)", () => {
+  assert.match(SRC, /const SM_DIALOG_OPACITY = \{ min: 0, max: 100, step: 5, default: 25 \}/);
   assert.match(SRC, /const SM_DIALOG_OPACITY_KEY = "dsh-session-manager-dialog-opacity"/);
   assert.match(SRC, /const SM_DIALOG_OPACITY_VAR = "--sm-dialog-opacity"/);
   assert.match(SRC, /--sm-dialog-fill:color-mix\(in srgb,var\(--sm-dialog-surface\) var\(--sm-dialog-opacity,100%\),transparent\)/);

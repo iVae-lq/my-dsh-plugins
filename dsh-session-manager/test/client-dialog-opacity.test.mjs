@@ -11,18 +11,19 @@ const STORAGE_KEY = "dsh-session-manager-dialog-opacity";
 // 1. Preference: default, persistence, normalization
 // =========================================================================
 
-test("dialog opacity: defaults to 100% and publishes the CSS variable on load", () => {
+test("dialog opacity: defaults to 25% and publishes the CSS variable on load", () => {
   const harness = mountClient();
   const { updateStore } = harness.exports;
 
-  assert.equal(updateStore.getDialogOpacity(), 100, "default dialog opacity must be 100");
+  assert.equal(updateStore.getDialogOpacity(), 25, "default dialog opacity must be 25");
+  assert.equal(updateStore.DIALOG_OPACITY.default, 25);
   assert.equal(updateStore.DIALOG_OPACITY.min, 0);
   assert.equal(updateStore.DIALOG_OPACITY.max, 100);
   assert.equal(updateStore.DIALOG_OPACITY.step, 5);
   assert.equal(harness.localStorage.getItem(STORAGE_KEY), null, "the default must not write storage");
 
   // The CSS variable is published at bundle load, before any dialog renders.
-  assert.equal(harness.rootStyleValues.get(OPACITY_VAR), "100%");
+  assert.equal(harness.rootStyleValues.get(OPACITY_VAR), "25%");
 
   harness.dispose();
 });
@@ -68,18 +69,18 @@ test("dialog opacity: values are clamped to 0..100 and snapped to the 5% step", 
   assert.equal(updateStore.getDialogOpacity(), 75, "off-step values snap to the nearest 5%");
 
   updateStore.setDialogOpacity(Number.NaN);
-  assert.equal(updateStore.getDialogOpacity(), 100, "a non-numeric value falls back to the default");
+  assert.equal(updateStore.getDialogOpacity(), 25, "a non-numeric value falls back to the default");
 
   // Persisted garbage is normalized too.
   harness.localStorage.setItem(STORAGE_KEY, "banana");
-  assert.equal(updateStore.getDialogOpacity(), 100);
+  assert.equal(updateStore.getDialogOpacity(), 25);
   harness.localStorage.setItem(STORAGE_KEY, "88");
   assert.equal(updateStore.getDialogOpacity(), 90);
 
   harness.dispose();
 });
 
-test("dialog opacity: resetDialogOpacity restores 100%", () => {
+test("dialog opacity: resetDialogOpacity restores the 25% default", () => {
   const harness = mountClient();
   const { updateStore } = harness.exports;
 
@@ -87,9 +88,9 @@ test("dialog opacity: resetDialogOpacity restores 100%", () => {
   assert.equal(harness.rootStyleValues.get(OPACITY_VAR), "55%");
 
   updateStore.resetDialogOpacity();
-  assert.equal(updateStore.getDialogOpacity(), 100);
-  assert.equal(harness.rootStyleValues.get(OPACITY_VAR), "100%");
-  assert.equal(harness.localStorage.getItem(STORAGE_KEY), "100");
+  assert.equal(updateStore.getDialogOpacity(), 25);
+  assert.equal(harness.rootStyleValues.get(OPACITY_VAR), "25%");
+  assert.equal(harness.localStorage.getItem(STORAGE_KEY), "25");
 
   harness.dispose();
 });
@@ -98,12 +99,13 @@ test("dialog opacity: resetDialogOpacity restores 100%", () => {
 // 1b. Frosted glass: switch + blur strength
 // =========================================================================
 
-test("frosted glass: defaults to on at 24px and publishes the blur variable on load", () => {
+test("frosted glass: defaults to on at 12px and publishes the blur variable on load", () => {
   const harness = mountClient();
   const { updateStore } = harness.exports;
   assert.equal(updateStore.getGlassEnabled(), true);
-  assert.equal(updateStore.getGlassBlur(), 24);
-  assert.equal(harness.rootStyleValues.get("--sm-glass-blur"), "24px");
+  assert.equal(updateStore.getGlassBlur(), 12);
+  assert.equal(updateStore.GLASS.blur.default, 12);
+  assert.equal(harness.rootStyleValues.get("--sm-glass-blur"), "12px");
   harness.dispose();
 });
 
@@ -119,7 +121,7 @@ test("frosted glass: switch and blur persist, are clamped to 0..64 and snap to 2
   assert.equal(updateStore.getGlassEnabled(), false);
   updateStore.resetGlass();
   assert.equal(updateStore.getGlassEnabled(), true);
-  assert.equal(updateStore.getGlassBlur(), 24);
+  assert.equal(updateStore.getGlassBlur(), 12);
   harness.dispose();
 });
 
@@ -145,7 +147,7 @@ test("frosted glass: the settings card exposes a switch and a 0..64 blur slider"
   assert.equal(slider.props.min, 0);
   assert.equal(slider.props.max, 64);
   assert.equal(slider.props.step, 2);
-  assert.equal(slider.props.value, 24);
+  assert.equal(slider.props.value, 12);
   host.dispose();
   harness.dispose();
 });
@@ -165,19 +167,19 @@ test("dialog opacity: settings card renders a 0..100 slider at 5% steps showing 
   assert.equal(slider.props.min, 0);
   assert.equal(slider.props.max, 100);
   assert.equal(slider.props.step, 5);
-  assert.equal(slider.props.value, 100, "slider starts at the default 100%");
-  assert.equal(slider.props["aria-valuetext"], "100%");
+  assert.equal(slider.props.value, 25, "slider starts at the default 25%");
+  assert.equal(slider.props["aria-valuetext"], "25%");
 
   // The percentage is also rendered as text next to the slider.
   assert.ok(text(host.tree).includes(harness.t("settings.dialogOpacity")), "label must be rendered");
-  assert.ok(text(host.tree).includes("100%"), "current percentage must be rendered");
+  assert.ok(text(host.tree).includes("25%"), "current percentage must be rendered");
   assert.ok(text(host.tree).includes(harness.t("settings.dialogOpacity.hint")), "hint must be rendered");
 
   host.dispose();
   harness.dispose();
 });
 
-test("dialog opacity: moving the slider updates the store, storage and CSS; reset restores 100%", () => {
+test("dialog opacity: moving the slider updates the store, storage and CSS; reset restores the 25% default", () => {
   const harness = mountClient();
   const { SessionManagerSettingsCard, updateStore } = harness.exports;
 
@@ -200,8 +202,8 @@ test("dialog opacity: moving the slider updates the store, storage and CSS; rese
   assert.equal(resetBtn().props.disabled, false, "reset becomes available once the value changed");
 
   resetBtn().props.onClick();
-  assert.equal(updateStore.getDialogOpacity(), 100);
-  assert.equal(harness.rootStyleValues.get(OPACITY_VAR), "100%");
+  assert.equal(updateStore.getDialogOpacity(), 25);
+  assert.equal(harness.rootStyleValues.get(OPACITY_VAR), "25%");
 
   host.dispose();
   harness.dispose();

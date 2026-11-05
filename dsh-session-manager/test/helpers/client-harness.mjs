@@ -28,7 +28,7 @@ const clipboardStub = { writes: [], writeText(text) { this.writes.push(text); re
 /** Real, unmodified client bundle and registered slots, with a small hook host
  * to keep CI dependency-free. Tests exercise rendered controls, shared-store
  * subscriptions, async responses and the actual annotation editor. */
-export function mountClient({ sessions = [], current = "", archivedIds = [], workspaces = [], language = "zh", sessionCreatedAt = {}, fetchWorkspaces, sessionAnnotations = {}, fetchAnnotations, saveAnnotations, fetchUpdateCheck, fetchUpdateInstall, fetchUpdateStatus, fetchNpmLatest, fetchPresetScan, fetchPresets, migratePreset, fetchDeletePreview, confirm = () => true, wide = true, initialStorage = {}, innerWidth = 1200, innerHeight = 768, querySelector: customQuerySelector } = {}) {
+export function mountClient({ sessions = [], current = "", archivedIds = [], workspaces = [], language = "zh", sessionCreatedAt = {}, fetchWorkspaces, sessionAnnotations = {}, fetchAnnotations, saveAnnotations, fetchUpdateCheck, fetchUpdateInstall, fetchUpdateStatus, fetchNpmLatest, fetchPresetScan, fetchPresets, migratePreset, fetchDeletePreview, shortcuts, confirm = () => true, wide = true, initialStorage = {}, innerWidth = 1200, innerHeight = 768, querySelector: customQuerySelector } = {}) {
   // Fresh clipboard stub per mount so each test sees only its own writes.
   clipboardStub.writes.length = 0;
   let list = { ids: sessions.map(s => s.id), byId: Object.fromEntries(sessions.map(s => [s.id, s])), current };
@@ -371,6 +371,8 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
   }, { filename: "lib/client.js" });
   const registered = new Map(); let dictionaries;
   const ctx = {
+    // Optional DSH shortcut service stub, adopted through ctx.get("shortcuts").
+    ...(shortcuts ? { get: name => (name === "shortcuts" ? shortcuts : undefined) } : {}),
     effect(fn) { const cleanup = fn(); if (typeof cleanup === "function") pluginCleanup.push(cleanup); },
     locale: { register(_name, values) { dictionaries = values; } },
     slots: {
