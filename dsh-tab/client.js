@@ -49,6 +49,7 @@ window.__ModuleLoader__.load({
     const ZH = {
       'tab.list': '会话标签页',
       'tab.new': '新建会话',
+      'tab.more': '更多标签页',
       'tab.newSession': '新会话',
       'tab.untitled': '未命名',
       'tab.close': '关闭标签页：{title}',
@@ -74,6 +75,7 @@ window.__ModuleLoader__.load({
     const EN = {
       'tab.list': 'Conversation tabs',
       'tab.new': 'New conversation',
+      'tab.more': 'More tabs',
       'tab.newSession': 'New session',
       'tab.untitled': 'Untitled',
       'tab.close': 'Close tab: {title}',
@@ -134,9 +136,11 @@ div:has(> [data-shell-bottom]):has(> [data-shell-overlay]) > :nth-child(3) {
 div:has(> [data-shell-bottom]):has(> [data-shell-overlay]) > [data-side] {
   grid-area: 1 / 1 / 3 / -1 !important;
 }
-/* Windows 标题栏：圆角原本在会话列左上，现在改由标签栏承载 */
-[data-windows-titlebar] div:has(> [data-shell-bottom]) > :nth-child(2) {
-  border-top-left-radius: 0 !important;
+/* Windows 标题栏：标签栏直接放进标题栏（见 CSS 里的 html[data-windows-titlebar] 段），
+   帧里不再给它留空行：第 1 行归零，会话内容整体上移，官方圆角保持原样 */
+html[data-windows-titlebar] div:has(> [data-shell-bottom]):has(> [data-shell-overlay]),
+html[data-windows-titlebar] div:has(> [data-shell-bottom])[data-rightbar-fullscreen]:has(> [data-shell-overlay]) {
+  grid-template-rows: 0 minmax(0, 1fr) auto !important;
 }
 `
 
@@ -150,8 +154,24 @@ div:has(> [data-shell-bottom]):has(> [data-shell-overlay]) > [data-side] {
   box-shadow:inset 0 -.5px 0 var(--dsw-alias-border-l2);
   -webkit-app-region:drag;
   --dsh-tab-max-width:180px}
-html[data-windows-titlebar] .dsh-tab-pagebar{top:var(--dsh-windows-titlebar-height, 0px);
-  border-top-left-radius:var(--dsh-windows-content-radius, 16px);corner-shape:round}
+/* Windows：标签栏放进标题栏。左缘 = 左侧栏右缘 + 一段空白（留给拖动窗口）；
+   右缘避开窗口按钮（titlebar-area 环境变量，没有时按 138px 兜底）再留一点空隙 */
+html[data-windows-titlebar] .dsh-tab-pagebar{top:0;
+  height:var(--dsh-windows-titlebar-height, 40px);
+  left:calc(max(var(--dsh-tab-left, 0px), var(--dsh-frame-leading-clearance, 0px)) + 24px);
+  right:calc(max(138px, 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)) + 8px);
+  padding:0;background:transparent;box-shadow:none;border-radius:0}
+html[data-windows-titlebar] .dsh-tab-pagebar__tab{height:calc(var(--dsh-windows-titlebar-height, 40px) - 8px)}
+html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:calc(var(--dsh-windows-titlebar-height, 40px) - 4px)}
+/* 标签放不下时：右缘渐隐，提示后面还有，「…」按钮列出被挤出去的标签 */
+.dsh-tab-pagebar__strip[data-overflow=true]{
+  -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent);
+  mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent)}
+.dsh-tab-pagebar__more{flex:none;align-self:center;width:30px;height:30px;display:grid;place-items:center;padding:0;
+  margin-left:2px;border:none;border-radius:var(--dsw-radius-sm);background:transparent;
+  color:var(--dsw-alias-label-secondary);cursor:pointer;-webkit-app-region:no-drag;
+  transition:background-color .12s ease,color .12s ease}
+.dsh-tab-pagebar__more:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 [data-rightbar-fullscreen] .dsh-tab-pagebar{display:none}
 .dsh-tab-pagebar__strip{display:flex;align-items:flex-end;flex:0 1 auto;min-width:0;
   height:100%;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;scroll-padding-inline:8px}
@@ -274,6 +294,13 @@ html[data-windows-titlebar] .dsh-tab-pagebar{top:var(--dsh-windows-titlebar-heig
     }
     function IconPlus() {
       return svg(h('path', { d: 'M8 3.2v9.6M3.2 8h9.6' }))
+    }
+    function IconMore() {
+      return svg([
+        h('circle', { key: 'a', cx: 3.5, cy: 8, r: 0.9, fill: 'currentColor' }),
+        h('circle', { key: 'b', cx: 8, cy: 8, r: 0.9, fill: 'currentColor' }),
+        h('circle', { key: 'c', cx: 12.5, cy: 8, r: 0.9, fill: 'currentColor' }),
+      ])
     }
     function IconClose() {
       return h(
@@ -644,6 +671,8 @@ html[data-windows-titlebar] .dsh-tab-pagebar{top:var(--dsh-windows-titlebar-heig
         const workspaces = useWorkspaces((state) => state)
         const snapshot = useSyncExternalStore(actions.store.subscribe, actions.store.getSnapshot)
         const [menu, setMenu] = useState(null)
+        const [overflowed, setOverflowed] = useState(false)
+        const [listMenu, setListMenu] = useState(null)
 
         const rows = catalog?.byId ?? {}
         const archived = useMemo(() => new Set(workspaces?.archivedSessionIds ?? []), [workspaces])
@@ -903,6 +932,52 @@ html[data-windows-titlebar] .dsh-tab-pagebar{top:var(--dsh-windows-titlebar-heig
           }
         }, [])
 
+        // 标签放不下（标签已缩到最小宽度仍超出）：标签条右缘渐隐 + 显示「…」按钮
+        useEffect(() => {
+          const strip = stripRef.current
+          if (strip === null) return undefined
+          const measure = () => setOverflowed(strip.scrollWidth - strip.clientWidth > 1)
+          measure()
+          if (typeof ResizeObserver !== 'function') return undefined
+          const observer = new ResizeObserver(measure)
+          observer.observe(strip)
+          for (const child of strip.children) observer.observe(child)
+          return () => observer.disconnect()
+        }, [tabs, visualActiveId])
+
+        const dismissListMenu = useCallback(() => setListMenu(null), [])
+        const openListMenu = (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          const strip = stripRef.current
+          if (strip === null) return
+          const rect = event.currentTarget.getBoundingClientRect()
+          const viewLeft = strip.scrollLeft
+          const viewRight = viewLeft + strip.clientWidth
+          const hidden = tabs.filter((tab) => {
+            const element = strip.querySelector(`[data-session-id="${tab.id}"]`)
+            if (element === null) return false
+            return element.offsetLeft < viewLeft - 1 || element.offsetLeft + element.offsetWidth > viewRight + 1
+          })
+          const source = hidden.length === 0 ? tabs : hidden
+          setListMenu({
+            x: rect.left,
+            y: rect.bottom + 4,
+            items: source.map((tab) => {
+              const row = rows[tab.id]
+              const title = row?.blank === true ? t('tab.newSession') : row?.displayTitle || row?.title || t('tab.untitled')
+              return {
+                key: tab.id,
+                label: h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis' } }, title),
+                run: () => {
+                  setListMenu(null)
+                  requestSelect(tab.id)
+                },
+              }
+            }),
+          })
+        }
+
         // 菜单指向的标签被关掉 / 归档后自动收起
         useEffect(() => {
           if (menu === null) return
@@ -1041,6 +1116,7 @@ html[data-windows-titlebar] .dsh-tab-pagebar{top:var(--dsh-windows-titlebar-heig
                 key: 'strip',
                 ref: stripRef,
                 className: 'dsh-tab-pagebar__strip',
+                'data-overflow': overflowed ? 'true' : 'false',
                 role: 'tablist',
                 'aria-label': t('tab.list'),
               },
@@ -1073,6 +1149,21 @@ html[data-windows-titlebar] .dsh-tab-pagebar{top:var(--dsh-windows-titlebar-heig
                   : [node]
               }),
             ),
+            overflowed
+              ? h(
+                  'button',
+                  {
+                    key: 'more',
+                    type: 'button',
+                    className: 'dsh-tab-pagebar__more',
+                    title: t('tab.more'),
+                    'aria-label': t('tab.more'),
+                    'aria-haspopup': 'menu',
+                    onClick: openListMenu,
+                  },
+                  h(IconMore),
+                )
+              : null,
             h(
               'button',
               {
@@ -1086,6 +1177,9 @@ html[data-windows-titlebar] .dsh-tab-pagebar{top:var(--dsh-windows-titlebar-heig
               h(IconPlus),
             ),
           ),
+          listMenu === null
+            ? null
+            : h(TabMenu, { key: 'list-menu', x: listMenu.x, y: listMenu.y, items: listMenu.items, onClose: dismissListMenu }),
           menu === null
             ? null
             : h(TabMenu, {
