@@ -449,6 +449,19 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
           pinned = pinned.filter((item) => !drop.has(item))
           publish()
         },
+        /** 把 oldId 的标签原位换成 newId；newId 已经有标签时只摘掉 oldId。 */
+        replace(oldId, newId) {
+          if (oldId === newId || !ids.includes(oldId)) return false
+          if (ids.includes(newId)) {
+            ids = ids.filter((item) => item !== oldId)
+            pinned = pinned.filter((item) => item !== oldId)
+          } else {
+            ids = ids.map((item) => (item === oldId ? newId : item))
+            pinned = pinned.map((item) => (item === oldId ? newId : item))
+          }
+          publish()
+          return true
+        },
         /** 固定分组内拖动排序（referenceId 目标标签，place 表示放在它前/后）。 */
         movePinned(id, referenceId, place) {
           if (!pinned.includes(id) || !pinned.includes(referenceId) || id === referenceId) return
@@ -774,11 +787,31 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
         }, [])
 
         // 当前会话自动入签（官方侧栏点开会话、启动恢复、新建会话都走这里）
+        const lastActiveRef = useRef(undefined)
         useEffect(() => {
           actions.store.pruneSuppressed(activeSessionId)
           if (activeSessionId === undefined) return
           if (actions.store.isSuppressed(activeSessionId)) return
-          if (rows[activeSessionId] === undefined) return
+          const row = rows[activeSessionId]
+          if (row === undefined) return
+          const previous = lastActiveRef.current
+          lastActiveRef.current = activeSessionId
+          const fromTab = actions.consumeTabNavigation(activeSessionId)
+          // 在「新会话」页切工作区：官方每个工作区复用自己的空白会话，切过去会打开目标工作区的
+          // 空白会话，原来那个空白会话不删。这时把原来的空白标签原位换成新的，不再追加一个
+          // 「新会话」标签。点标签切换、从有内容的会话跳过来、固定标签都不走这里。
+          if (
+            !fromTab &&
+            previous !== undefined &&
+            previous !== activeSessionId &&
+            row.blank === true &&
+            rows[previous]?.blank === true &&
+            actions.store.has(previous) &&
+            !actions.store.getSnapshot().pinned.includes(previous)
+          ) {
+            actions.store.replace(previous, activeSessionId)
+            return
+          }
           if (!actions.store.has(activeSessionId)) actions.store.add(activeSessionId)
         }, [activeSessionId, catalog])
 
@@ -1517,15 +1550,27 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
           },
         }
 
+        // 最近一次由标签栏发起的切换（点标签）：入签逻辑据此区分「用户点标签」和「官方自己跳转」
+        let tabNavigation = null
+        const TAB_NAVIGATION_WINDOW = 10_000
+
         const actions = {
           store,
           panel: panelApi,
+          /** 当前会话是不是刚由点标签切过来的（读一次即清除）。 */
+          consumeTabNavigation(id) {
+            const pending = tabNavigation
+            if (pending === null || pending.id !== id) return false
+            tabNavigation = null
+            return Date.now() - pending.at < TAB_NAVIGATION_WINDOW
+          },
           select(id) {
             try {
               // 面板盖在会话上时，点会话标签先回到会话界面（不改变当前会话）
               if (panelApi.getActive() !== null) layout.selectPanel(null)
               const current = currentSessionIdOf(sessions.list.getSnapshot())
               if (current === id) return
+              tabNavigation = { id, at: Date.now() }
               uiWorkspace.openSession(id)
             } catch (error) {
               console.error('dsh-tab: switching conversation failed', error)
