@@ -654,9 +654,10 @@ test("archive session fallback rejects when ctx.waterfall query throws an error 
 });
 
 /** A live session + live Agent whose preset can be switched without restarting DSH. */
-function liveSwitchFixture(f, { composed = "old", openTurnStartSeq = null, recomposeError } = {}) {
+function liveSwitchFixture(f, { composed = "old", openTurnStartSeq = null, recomposeError, withTransit = false } = {}) {
   const appended = [];
   const recomposed = [];
+  const transits = { registered: [], retired: [], ids: new Set() };
   const state = { composed };
   const agent = { id: "s1", ctx: { agentCtx: true }, status: "idle" };
   const liveSession = {
@@ -669,7 +670,7 @@ function liveSwitchFixture(f, { composed = "old", openTurnStartSeq = null, recom
   f.ctx.agents.get = id => (id === "s1" ? agent : undefined);
   f.services.agentPresets = {
     switches: new Map(),
-    list: async () => [{ id: "old" }, { id: "new" }],
+    list: async () => [{ id: "old" }, { id: "new" }, ...[...transits.ids].map(id => ({ id }))],
     composedPreset: c => (c === agent.ctx ? state.composed : undefined),
     recompose: async (c, id) => {
       if (recomposeError) throw recomposeError;
@@ -678,10 +679,20 @@ function liveSwitchFixture(f, { composed = "old", openTurnStartSeq = null, recom
       return { id };
     },
   };
+  if (withTransit) {
+    f.services.agentPresets.register = async definition => {
+      transits.registered.push(definition.id);
+      transits.ids.add(definition.id);
+      return async () => {
+        transits.ids.delete(definition.id);
+        transits.retired.push(definition.id);
+      };
+    };
+  }
   f.services.sessionProjections = {
     stateOf: (session, key) => (session === liveSession && key === "turnBoundary" ? { openTurnStartSeq, lastTurn: 2 } : undefined),
   };
-  return { agent, liveSession, appended, recomposed, state };
+  return { agent, liveSession, appended, recomposed, state, transits };
 }
 
 test("live preset migration rebinds the running Agent at once (no restart) and records the choice", async t => {
@@ -735,6 +746,33 @@ test("GET /presets returns display metadata without reading any session artifact
     { id: "custom", name: "Mine", description: "d" },
     { id: "bad", broken: "boom" },
   ]);
+});
+
+test("live preset migration passes through a retired transit preset and never logs it", async t => {
+  const f = await fixture(t);
+  await f.stage({ events: [{ type: "agent-preset/selected", seq: 0, data: { agentPreset: "old" } }] });
+  const live = liveSwitchFixture(f, { withTransit: true });
+  const response = await f.mount().request("/preset-migrate", { sessionId: "s1", toPreset: "new" });
+  assert.equal(response.status, 200, response.data.error);
+  assert.equal(live.transits.registered.length, 1);
+  const [transit] = live.transits.registered;
+  assert.match(transit, /^session-manager-transit-/);
+  assert.deepEqual(live.recomposed, [transit, "new"], "empty transit first, then the target");
+  assert.deepEqual(live.transits.retired, [transit], "the transit preset is retired after the switch");
+  assert.equal(live.state.composed, "new");
+  assert.ok(!live.appended.some(e => e.data?.agentPreset === transit), "the transit never reaches the session log");
+});
+
+test("transit presets are hidden from /presets and refused as migration targets", async t => {
+  const f = await fixture(t);
+  f.services.agentPresets = { list: async () => [{ id: "standard" }, { id: "session-manager-transit-x-1", name: "session-manager transit" }] };
+  const plugin = f.mount();
+  const roster = await plugin.request("/presets", undefined, "GET");
+  assert.equal(roster.status, 200, roster.data?.error);
+  assert.deepEqual(roster.data.result.presets, [{ id: "standard" }]);
+  const migrate = await plugin.request("/preset-migrate", { sessionId: "s1", toPreset: "session-manager-transit-x-1" });
+  assert.notEqual(migrate.status, 200);
+  assert.match(migrate.data.error, /不存在/);
 });
 
 test("a failed live rebind surfaces as an error and leaves the session file untouched", async t => {

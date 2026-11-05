@@ -64,7 +64,7 @@
     "node": "^22.15.0 || >=24.0.0"
   },
   "scripts": {
-    "check": "node --check lib/index.js && node --check lib/client.js && node --check lib/session-files.js && node --check lib/annotation-store.js && node --check lib/workspace-archive-store.js && node --check lib/clipboard-parser.js && node -e \"import('./lib/index.js')\"",
+    "check": "node --check lib/index.js && node --check lib/client.js && node --check lib/session-files.js && node --check lib/annotation-store.js && node --check lib/workspace-archive-store.js && node --check lib/clipboard-parser.js && node --check lib/preset-switch.js && node -e \"import('./lib/index.js')\"",
     "test": "node scripts/run-tests.mjs",
     "check:package": "node scripts/check-package.mjs"
   }

@@ -28,6 +28,7 @@ import { basename, dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { createAnnotationStore } from "./annotation-store.js";
 import { createWorkspaceArchiveStore, assertWorkspaceId } from "./workspace-archive-store.js";
+import { recomposeAgentPreset, isTransitPresetId } from "./preset-switch.js";
 import { createDshAdapter, getService, normalizeSessionHeader, compareSemver, detectPluginSource, isHmrActive, resolveProfileDir } from "./compat/dsh-adapter.js";
 import { ARTIFACT_NAMES, assertSessionId, assertSessionDirectory, candidateSessionDirs, encodeFsSessionSegment, decodeFsSessionSegment, encodeProjectSegment, encodeSessionSegment, parseSessionGenerationFromFilename, readSessionHeader, readSessionFile, writeTempFile, replaceSessionFile } from "./session-files.js";
 
@@ -1512,7 +1513,7 @@ ${rest}`, "utf8");
         if (ap !== void 0 && typeof ap.list === "function") {
           const list = await ap.list();
           for (const p of (list || [])) {
-            if (p && typeof p.id === "string" && p.id.length > 0) allPresetIds.push(p.id);
+            if (p && typeof p.id === "string" && p.id.length > 0 && !isTransitPresetId(p.id)) allPresetIds.push(p.id);
           }
         }
       } catch { /* ignore -- fall back to used presets only */ }
@@ -1715,19 +1716,20 @@ ${rest}`, "utf8");
     };
     /**
      * Rebind a live Agent to `toPreset` now, so the switch applies from the next
-     * message without restarting DSH. DSH's `agentPresets.select()` refuses once a
-     * session has started; `recompose()` is the primitive it uses, and only that
-     * "already started" check is skipped here. A failure propagates (nothing has
-     * been written yet) instead of silently leaving the old composition live.
+     * message without restarting DSH. The rebind passes through an empty transit
+     * preset so per-Agent tools (`subagent`, `list_subagent_models`) survive
+     * switching in either direction; see ./preset-switch.js. A failure
+     * propagates (nothing has been written yet) instead of silently leaving the
+     * old composition live.
      * @returns true when the live Agent was rebound.
      */
-    const recomposeLiveAgent = async (presets, liveAgent, toPreset) => {
-      if (liveAgent === void 0 || !liveAgent.ctx || typeof presets?.recompose !== "function") return false;
-      const composed = typeof presets.composedPreset === "function" ? presets.composedPreset(liveAgent.ctx) : void 0;
-      if (composed === toPreset) return false;
-      await presets.recompose(liveAgent.ctx, toPreset);
-      return true;
-    };
+    const recomposeLiveAgent = (presets, liveAgent, toPreset) => recomposeAgentPreset({
+      presets,
+      agent: liveAgent,
+      toPreset,
+      tools: ctx.get("tools"),
+      logger: ctx.logger
+    });
     /** Rewrite exactly one conversation's effective Agent preset. */
     const migratePreset = async (opts) => {
       const sessionId = typeof opts.sessionId === "string" ? opts.sessionId.trim() : "";
@@ -1739,10 +1741,10 @@ ${rest}`, "utf8");
       if (presets === void 0 || typeof presets.list !== "function") {
         throw new Error("agentPresets service unavailable");
       }
-      const roster = await presets.list();
-      const target = (roster || []).find((preset) => preset && preset.id === toPreset);
+      const roster = ((await presets.list()) || []).filter((preset) => !isTransitPresetId(preset?.id));
+      const target = roster.find((preset) => preset && preset.id === toPreset);
       if (target === void 0) {
-        const available = (roster || []).map((preset) => preset?.id).filter(Boolean);
+        const available = roster.map((preset) => preset?.id).filter(Boolean);
         throw new Error(`Agent 预设 "${toPreset}" 不存在（可用：${available.join(", ")}）`);
       }
       if (target.broken !== void 0) throw new Error(`Agent 预设 "${toPreset}" 不可用：${target.broken}`);
@@ -2662,7 +2664,7 @@ ${rest}`, "utf8");
           return send(res, 200, {
             ok: true,
             result: {
-              presets: roster.filter((row) => row && typeof row.id === "string").map((row) => ({
+              presets: roster.filter((row) => row && typeof row.id === "string" && !isTransitPresetId(row.id)).map((row) => ({
                 id: row.id,
                 ...(typeof row.name === "string" ? { name: row.name } : {}),
                 ...(typeof row.description === "string" ? { description: row.description } : {}),
