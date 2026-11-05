@@ -644,22 +644,29 @@ test('exports the loader contract', () => {
   assert.ok(T.SEAT_PRIORITY < 0, 'a single slot renders the LOWEST priority number; the native seat is 0, so this must be negative')
 })
 
-test('motion: hover is never delayed, motion never blocks input, and every animation has a reduced-motion escape', () => {
+test('motion: the pointer is tracked without delay or smoothing; only open/close animate, never blocking input', () => {
   const source = readFileSync(new URL('../client.js', import.meta.url), 'utf8')
   assert.ok(!/HOVER_INTENT|hoverTimer|clearHover/.test(source), 'no hover-intent timer: the highlight follows the pointer event itself')
+  assert.ok(!/data-glide|prevFlyPos|SCROLL_QUIET/.test(source), 'no flyout glide: it trails the pointer')
   const css = T.CSS
   for (const name of ['mep-menu-in', 'mep-menu-out', 'mep-fly-in', 'mep-fly-out']) assert.match(css, new RegExp('@keyframes ' + name + '\\{'), name)
   // a leaving menu ignores the pointer, so the fade-out can never swallow a click meant for what is underneath
   assert.match(css, /\.mep-menu\[data-leaving\]\{pointer-events:none/)
   assert.match(css, /\.mep-flyout\[data-leaving\]\{pointer-events:none/)
-  // the highlight comes in fast and fades out slower
-  assert.match(css, /\.mep-row\{[^}]*transition:background-color \.18s/)
-  assert.match(css, /\.mep-row\[data-active\]\{[^}]*transition-duration:\.06s/)
-  // reduced motion switches all of it off
+  // rows and flyout items carry an explicit `transition:none` (so a global / skin rule cannot add one): a
+  // fading highlight leaves a ghost on the row the pointer just left, a glide makes the flyout trail it
+  for (const selector of ['\\.mep-row', '\\.mep-fitem']) {
+    const base = css.match(new RegExp('(?:^|\\n)' + selector + '\\{([^}]*)\\}'))
+    assert.ok(base, selector + ' base rule found')
+    assert.match(base[1], /(?:^|;)transition:none(?:;|$)/, selector + ' pins transition:none')
+    const active = css.match(new RegExp('(?:^|\\n)' + selector + '\\[data-active\\]\\{([^}]*)\\}'))
+    assert.ok(active && !/transition/.test(active[1]), selector + ' active rule found and does not re-enable one')
+  }
+  assert.match(css, /\.mep-menu,\.mep-flyout\{[^}]*;transition:none\}/, 'menu and flyout pin transition:none (their position is never animated)')
+  assert.ok(!/transition:\s*(?:top|left|all)/.test(css.replace(/\.mep-chevron[^}]*\}/, '')), 'nothing transitions position')
+  // reduced motion switches the open/close animation off
   const reduced = css.split('@media (prefers-reduced-motion:reduce)').slice(1).join('\n')
   assert.match(reduced, /\.mep-menu\[data-leaving\],\.mep-flyout\[data-leaving\]\{animation:none\}/)
-  assert.match(reduced, /\.mep-flyout\[data-glide\]\{transition:none\}/)
-  assert.match(reduced, /\.mep-row,\.mep-fitem\{transition:none\}/)
 })
 
 test('apply: registers the seat below the native priority, the settings rows, dictionaries and styles', () => {

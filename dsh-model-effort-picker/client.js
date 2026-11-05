@@ -49,12 +49,12 @@ window.__ModuleLoader__.load({
     const MAX_FAVORITES = 100
     const MENU_WIDTH = 440
     const FLY_WIDTH = 220
-    // Pointer hover is never delayed: the highlight (and the flyout beside it) follows the pointer on
-    // the very event. Motion is CSS only and never gates input: the menu is interactive from the first
-    // frame, and while it fades out it ignores the pointer.
+    // Pointer tracking is never delayed or smoothed: the highlight and the flyout beside it land on the
+    // pointer's row in the same frame as the move (no hover-intent timer, no highlight fade, no flyout
+    // glide: any of those shows up as the UI trailing the mouse). Only opening and closing animate, and
+    // that never gates input: the menu is interactive from the first frame, and while it fades out it
+    // ignores the pointer.
     const LEAVE_MS = 110
-    // Don't glide the flyout while the list scrolls under it: it must stay glued to its row.
-    const SCROLL_QUIET_MS = 160
     const PERSIST_DEBOUNCE_MS = 400
     // Debounce of the footer info request (a network call, not UI latency): sweeping over rows must not fire one per row.
     const INFO_DELAY_MS = 120
@@ -864,15 +864,14 @@ window.__ModuleLoader__.load({
 @keyframes mep-fly-out{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(-4px)}}
 @keyframes mep-fade-in{from{opacity:0}to{opacity:1}}
 @media (prefers-reduced-motion:reduce){.mep-spin{animation-duration:2s}.mep-chevron{transition:none}}
-.mep-menu,.mep-flyout{position:fixed;z-index:1100;box-sizing:border-box;display:flex;flex-direction:column;border:0;border-radius:var(--dsw-radius-lg,12px);color:var(--dsw-alias-label-primary,#15171b);background:var(--dsw-specific-menu,var(--dsw-alias-bg-layer-3,#fff));-webkit-backdrop-filter:var(--dsw-menu-backdrop-filter,blur(40px) saturate(150%));backdrop-filter:var(--dsw-menu-backdrop-filter,blur(40px) saturate(150%));--dsw-elevation-stroke-color:var(--dsw-alias-border-l1,rgba(121,126,145,.2));box-shadow:var(--dsw-elevation-prominent,0 14px 42px rgba(18,24,42,.18),0 3px 10px rgba(18,24,42,.08));overflow:hidden;font-size:13px;line-height:18px;-webkit-user-select:none;user-select:none}
+.mep-menu,.mep-flyout{position:fixed;z-index:1100;box-sizing:border-box;display:flex;flex-direction:column;border:0;border-radius:var(--dsw-radius-lg,12px);color:var(--dsw-alias-label-primary,#15171b);background:var(--dsw-specific-menu,var(--dsw-alias-bg-layer-3,#fff));-webkit-backdrop-filter:var(--dsw-menu-backdrop-filter,blur(40px) saturate(150%));backdrop-filter:var(--dsw-menu-backdrop-filter,blur(40px) saturate(150%));--dsw-elevation-stroke-color:var(--dsw-alias-border-l1,rgba(121,126,145,.2));box-shadow:var(--dsw-elevation-prominent,0 14px 42px rgba(18,24,42,.18),0 3px 10px rgba(18,24,42,.08));overflow:hidden;font-size:13px;line-height:18px;-webkit-user-select:none;user-select:none;transition:none}
 body[data-ds-dark-theme] .mep-menu,body[data-ds-dark-theme] .mep-flyout{color:var(--dsw-alias-label-primary,#f2f4f8);background:var(--dsw-specific-menu,var(--dsw-alias-bg-layer-3,#202126));box-shadow:var(--dsw-elevation-prominent,0 18px 46px rgba(0,0,0,.48),0 3px 12px rgba(0,0,0,.32))}
 .mep-menu{padding:6px;--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);transform-origin:bottom right;animation:mep-menu-in .15s cubic-bezier(.25,0,.5,1)}
 .mep-menu[data-side=bottom]{transform-origin:top right}
 .mep-flyout{z-index:1101;width:${FLY_WIDTH}px;padding:6px;transform-origin:left top;animation:mep-fly-in .15s cubic-bezier(.25,0,.5,1)}
-.mep-flyout[data-glide]{transition:top .12s cubic-bezier(.25,0,.5,1)}
 .mep-menu[data-leaving]{pointer-events:none;animation:mep-menu-out ${LEAVE_MS}ms cubic-bezier(.25,0,.5,1) forwards}
 .mep-flyout[data-leaving]{pointer-events:none;animation:mep-fly-out ${LEAVE_MS}ms cubic-bezier(.25,0,.5,1) forwards}
-@media (prefers-reduced-motion:reduce){.mep-menu,.mep-flyout,.mep-menu[data-leaving],.mep-flyout[data-leaving]{animation:none}.mep-flyout[data-glide]{transition:none}}
+@media (prefers-reduced-motion:reduce){.mep-menu,.mep-flyout,.mep-menu[data-leaving],.mep-flyout[data-leaving]{animation:none}}
 .mep-search{display:flex;align-items:center;gap:8px;flex:none;padding:6px 8px 8px;color:var(--dsw-alias-label-tertiary,#9296a0)}
 .mep-search-input{flex:1;min-width:0;padding:0;border:0;outline:none;background:transparent;color:var(--dsw-alias-label-primary,#15171b);font:inherit;font-size:14px;line-height:20px;-webkit-user-select:text;user-select:text}
 .mep-search-input::placeholder{color:var(--dsw-alias-label-caption,#9296a0)}
@@ -883,21 +882,21 @@ body[data-ds-dark-theme] .mep-menu,body[data-ds-dark-theme] .mep-flyout{color:va
 .mep-strip button{flex:none;padding:0;border:0;background:transparent;color:inherit;font:inherit;font-weight:600;cursor:pointer}
 .mep-list{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:0 2px 2px}
 .mep-group{padding:10px 10px 4px;color:var(--dsw-alias-label-tertiary,#9296a0);font-size:12px;line-height:16px}
-.mep-row{display:flex;align-items:center;gap:8px;box-sizing:border-box;min-height:32px;padding:0 10px;border-radius:var(--dsw-radius-md,8px);cursor:pointer;color:inherit;background:transparent;transition:background-color .18s cubic-bezier(.25,0,.5,1)}
-.mep-row[data-active]{background:var(--dsw-alias-interactive-bg-hover);transition-duration:.06s}
+.mep-row{display:flex;align-items:center;gap:8px;box-sizing:border-box;min-height:32px;padding:0 10px;border-radius:var(--dsw-radius-md,8px);cursor:pointer;color:inherit;transition:none}
+.mep-row[data-active]{background:var(--dsw-alias-interactive-bg-hover)}
 .mep-check{display:grid;place-items:center;flex:0 0 16px;width:16px;color:var(--dsw-alias-label-primary,#15171b)}
 .mep-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
 .mep-provider{flex:none;color:var(--dsw-alias-label-tertiary,#9296a0);font-size:12px}
 .mep-row-right{display:flex;align-items:center;gap:2px;flex:none;margin-left:auto;padding-left:12px;color:var(--dsw-alias-label-secondary,#686c75);font-size:12px}
 .mep-empty{padding:14px 10px;color:var(--dsw-alias-label-tertiary,#9296a0);font-size:12px;text-align:center}
-.mep-fitem{display:flex;align-items:center;justify-content:space-between;gap:8px;box-sizing:border-box;min-height:30px;padding:0 10px;border-radius:var(--dsw-radius-md,8px);cursor:pointer;background:transparent;transition:background-color .18s cubic-bezier(.25,0,.5,1)}
-.mep-fitem[data-active]{background:var(--dsw-alias-interactive-bg-hover);transition-duration:.06s}
+.mep-fitem{display:flex;align-items:center;justify-content:space-between;gap:8px;box-sizing:border-box;min-height:30px;padding:0 10px;border-radius:var(--dsw-radius-md,8px);cursor:pointer;transition:none}
+.mep-fitem[data-active]{background:var(--dsw-alias-interactive-bg-hover)}
 .mep-fsep{flex:none;height:1px;margin:6px 4px;background:var(--dsw-alias-border-l2,rgba(121,126,145,.18))}
 .mep-kbd{display:inline-flex;gap:4px;flex:none}
 .mep-kbd span{display:inline-block;padding:0 5px;border-radius:4px;background:var(--dsw-alias-fill-tertiary,rgba(120,125,140,.14));color:var(--dsw-alias-label-secondary,#686c75);font-size:10px;line-height:16px;font-weight:600;letter-spacing:.02em}
 .mep-finfo{flex:none;padding:4px 10px 6px;color:var(--dsw-alias-label-tertiary,#9296a0);font-size:11px;line-height:16px}
 .mep-finfo>div{animation:mep-fade-in .18s ease-out}
-@media (prefers-reduced-motion:reduce){.mep-row,.mep-fitem{transition:none}.mep-finfo>div{animation:none}}
+@media (prefers-reduced-motion:reduce){.mep-finfo>div{animation:none}}
 .mep-setting{display:flex;flex-direction:column;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(121,126,145,.18))}
 .mep-setting-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 0;min-height:44px}
 .mep-setting-text{min-width:0;display:flex;flex-direction:column;gap:2px}
@@ -953,13 +952,17 @@ body[data-ds-dark-theme] .mep-menu,body[data-ds-dark-theme] .mep-flyout{color:va
       const inputRef = useRef(null)
       const rowRefs = useRef([])
       const lastMouse = useRef({ x: -1, y: -1 })
+      // Who is in charge of the highlight. After a real pointer move or a wheel turn it is the pointer
+      // (the row under it takes the highlight, also when the list scrolls beneath a resting pointer);
+      // after any key it is the keyboard (the browser's "pointer was re-tested" mouse moves that follow
+      // a scroll or re-layout must not take the highlight back from the keys).
+      const inputMode = useRef('keyboard')
+      // Where the highlight last came from. Only keyboard / programmatic changes scroll the list to
+      // reveal it; a pointer already sits on that row, and scrolling under it makes the row run away.
+      const hiSource = useRef('keyboard')
       // Closing keeps the menu mounted for LEAVE_MS so it can fade out; `leaving` marks that window.
       const [leaving, setLeaving] = useState(false)
       const leaveTimer = useRef(null)
-      // The flyout position committed last time and the last list scroll: the flyout only glides
-      // between two rows (never from its first placement, never while the list scrolls under it).
-      const prevFlyPos = useRef(null)
-      const scrolledAt = useRef(0)
       const uid = React.useId()
 
       const groups = useMemo(() => orderProviders(state.groups || []), [state.groups])
@@ -1030,6 +1033,9 @@ body[data-ds-dark-theme] .mep-menu,body[data-ds-dark-theme] .mep-flyout{color:va
 
       const openMenu = () => {
         cancelLeave()
+        // The menu appears under no pointer: the current model is revealed, and the pointer takes over on its first real move.
+        inputMode.current = 'keyboard'
+        hiSource.current = 'keyboard'
         setQuery('')
         setZone('list')
         setFi(0)
@@ -1040,6 +1046,8 @@ body[data-ds-dark-theme] .mep-menu,body[data-ds-dark-theme] .mep-flyout{color:va
       }
 
       const toggleFavorite = (key) => {
+        // The row moves to/from the favorites section: follow it into view.
+        hiSource.current = 'keyboard'
         if (key !== undefined) memory.toggleFavorite(key)
       }
 
@@ -1087,17 +1095,37 @@ body[data-ds-dark-theme] .mep-menu,body[data-ds-dark-theme] .mep-flyout{color:va
 
       const hoverRow = (row, event) => {
         const last = lastMouse.current
-        // Scrolling or re-layout under a resting pointer makes the browser fire a synthetic move
-        // at the same coordinates; only a real pointer move may take the highlight.
-        if (event.clientX === last.x && event.clientY === last.y) return
+        const moved = event.clientX !== last.x || event.clientY !== last.y
+        // A "move" without movement is the browser re-testing the pointer after a scroll or re-layout.
+        // It follows the pointer while the pointer is in charge, but must not take the highlight back
+        // from the keyboard.
+        if (!moved && inputMode.current !== 'pointer') return
         lastMouse.current = { x: event.clientX, y: event.clientY }
+        if (moved) inputMode.current = 'pointer'
         if (zone === 'flyout') setZone('list')
         if (hrow !== undefined && row.key === hrow.key) return
+        hiSource.current = 'pointer'
+        setHiKey(row.key)
+      }
+
+      /** The list moved under a resting pointer (wheel / touchpad): the row now under it takes the highlight. */
+      const followPointer = () => {
+        const point = lastMouse.current
+        if (inputMode.current !== 'pointer' || point.x < 0) return
+        const element = document.elementFromPoint(point.x, point.y)
+        const node = element !== null && typeof element.closest === 'function' ? element.closest('.mep-row') : null
+        if (node === null) return
+        const index = rowRefs.current.indexOf(node)
+        const row = index < 0 ? undefined : flat[index]
+        if (row === undefined || (hrow !== undefined && row.key === hrow.key)) return
+        hiSource.current = 'pointer'
         setHiKey(row.key)
       }
 
       const onKeyDown = (event) => {
         if (event.nativeEvent.isComposing || event.keyCode === 229) return
+        inputMode.current = 'keyboard'
+        hiSource.current = 'keyboard'
         const key = event.key
         const consume = () => {
           event.preventDefault()
@@ -1219,9 +1247,10 @@ body[data-ds-dark-theme] .mep-menu,body[data-ds-dark-theme] .mep-flyout{color:va
         if (open && pos !== null && inputRef.current !== null) inputRef.current.focus()
       }, [open, pos !== null])
 
-      // Keep the keyboard highlight visible.
+      // Keep a keyboard / programmatic highlight visible. A pointer highlight is never scrolled to: the
+      // pointer is already on that row, and moving the list under it makes the row run away.
       useLayoutEffect(() => {
-        if (!open || pos === null) return
+        if (!open || pos === null || hiSource.current === 'pointer') return
         const row = rowRefs.current[hiSafe]
         if (row !== undefined && row !== null && typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'nearest' })
       }, [open, pos !== null, hiSafe, query])
@@ -1257,11 +1286,6 @@ body[data-ds-dark-theme] .mep-menu,body[data-ds-dark-theme] .mep-flyout{color:va
         // Sub-pixel tolerance: measuring mid-animation adds float noise, and an exact compare could
         // re-render forever on it.
         setFlyPos((previous) => (previous !== null && Math.abs(previous.left - left) < 0.5 && Math.abs(previous.top - top) < 0.5 ? previous : { left, top }))
-      })
-
-      // Remember what this commit placed: the next render decides from it whether the flyout may glide.
-      useLayoutEffect(() => {
-        prevFlyPos.current = flyPos
       })
 
       // Footer info (context window, modalities) for the highlighted model, after a short dwell.
@@ -1373,8 +1397,6 @@ body[data-ds-dark-theme] .mep-menu,body[data-ds-dark-theme] .mep-flyout{color:va
             role: 'menu',
             'aria-label': t('effort.aria'),
             'data-leaving': leaving && !open ? '' : undefined,
-            // Glide between rows, but not from the first placement and not while the list scrolls.
-            'data-glide': prevFlyPos.current !== null && Date.now() - scrolledAt.current > SCROLL_QUIET_MS ? '' : undefined,
             style: flyPos === null ? { left: 0, top: 0, visibility: 'hidden' } : { left: flyPos.left, top: flyPos.top },
             onKeyDown,
             // Keep keyboard focus in the search box when a flyout row is clicked (Favorite keeps the menu open).
@@ -1521,9 +1543,14 @@ body[data-ds-dark-theme] .mep-menu,body[data-ds-dark-theme] .mep-flyout{color:va
                       className: 'mep-list scrollable',
                       role: 'listbox',
                       'aria-label': t('menu.aria'),
+                      onWheel: (event) => {
+                        // Turning the wheel over the list hands the highlight back to the pointer.
+                        inputMode.current = 'pointer'
+                        lastMouse.current = { x: event.clientX, y: event.clientY }
+                      },
                       onScroll: () => {
-                        scrolledAt.current = Date.now()
                         setScrollTick((tick) => (tick + 1) % 1000000)
+                        followPointer()
                       },
                     },
                     built.sections.map((section) =>
