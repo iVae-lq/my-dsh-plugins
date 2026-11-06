@@ -8323,6 +8323,22 @@ function isTopmostDialog(z) {
       // `workspaceId`. They normally agree, but `startSession` needs the client's, so match by
       // id first and fall back to the directory. null = DSH has the model loaded and the
       // project is not in it; the id is passed through untouched while the model is still empty.
+      // Runs a registered shortcut command by id, the way a native menu selection does (no key
+      // binding involved). DSH's shortcut service (`ShortcutsService`) keeps the command registry in
+      // its public `registry` field and `invoke(id, context)` lives THERE, not on the service
+      // itself -- so both are checked (the service first, should it ever grow its own).
+      // null when the host has no such service.
+      const shortcutCommandRunner = () => {
+        const shortcuts = optionalService("shortcuts");
+        if (!shortcuts) return null;
+        let registry;
+        try { registry = shortcuts.registry; } catch (_) { registry = undefined; }
+        for (const owner of [shortcuts, registry]) {
+          if (owner && typeof owner.invoke === "function") return (id, context) => owner.invoke(id, context);
+        }
+        return null;
+      };
+
       // DSH's own context-menu service (0.2.2+). The sidebar opens its session and workspace
       // menus through it, so opening the same targets here gives the identical menu, including
       // every row other plugins contribute (e.g. dsh-sidebar-row-menu). null on older hosts.
@@ -8530,20 +8546,20 @@ function isTopmostDialog(z) {
         // way a native menu selection does (independent of any key binding, which on the desktop
         // app are handled natively and cannot be triggered by a synthetic key event).
         canOpenSystemSettings: () => {
-          const shortcuts = optionalService("shortcuts");
-          if (!shortcuts || typeof shortcuts.invoke !== "function") return false;
+          if (!shortcutCommandRunner()) return false;
           try {
-            const rows = shortcuts.catalog && typeof shortcuts.catalog.getSnapshot === "function" ? shortcuts.catalog.getSnapshot() : undefined;
+            const shortcuts = optionalService("shortcuts");
+            const rows = shortcuts && shortcuts.catalog && typeof shortcuts.catalog.getSnapshot === "function" ? shortcuts.catalog.getSnapshot() : undefined;
             if (Array.isArray(rows)) return rows.some((row) => row && row.id === "settings.open");
           } catch (_) { /* unreadable catalog: try anyway */ }
           return true;
         },
         onOpenSystemSettings: () => {
-          const shortcuts = optionalService("shortcuts");
-          if (!shortcuts || typeof shortcuts.invoke !== "function") return false;
+          const run = shortcutCommandRunner();
+          if (!run) return false;
           try {
             // modal:null so the command opens the dialog instead of closing a modal that is "on top".
-            shortcuts.invoke("settings.open", { target: typeof document !== "undefined" ? document.body : null, region: "page", modal: null });
+            run("settings.open", { target: typeof document !== "undefined" ? document.body : null, region: "page", modal: null });
             return true;
           } catch (error) {
             console.error("session-manager: opening DSH settings failed", error);

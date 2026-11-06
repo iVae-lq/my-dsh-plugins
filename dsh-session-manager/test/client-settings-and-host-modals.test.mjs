@@ -12,14 +12,18 @@ import { mountClient, nodes, text } from "./helpers/client-harness.mjs";
 const sessions = [{ id: "A-101", displayTitle: "Alpha", updatedAt: 300, createdAt: 100 }];
 const workspaces = [{ id: "one", title: "项目一", path: "C:\\Projects\\One", sessionIds: ["A-101"] }];
 
-function shortcutsService({ commands = ["settings.open"], throws = false } = {}) {
+// DSH's `ShortcutsService` keeps its command registry in the public `registry` field and
+// `invoke(id, context)` lives on THAT, not on the service. The default shape mirrors this;
+// `shape: "service"` covers a host that ever puts `invoke` on the service itself. (The first
+// version of the System settings entry only looked on the service, so on a real DSH it never
+// appeared.)
+function shortcutsService({ commands = ["settings.open"], throws = false, shape = "registry" } = {}) {
   const invoked = [];
+  const invoke = (id, context) => { if (throws) throw new Error("boom"); invoked.push({ id, context }); };
+  const catalog = { getSnapshot: () => commands.map(id => ({ id })), subscribe: () => () => {} };
   return {
     invoked,
-    service: {
-      invoke(id, context) { if (throws) throw new Error("boom"); invoked.push({ id, context }); },
-      catalog: { getSnapshot: () => commands.map(id => ({ id })), subscribe: () => () => {} },
-    },
+    service: shape === "service" ? { invoke, catalog } : { registry: { invoke }, catalog },
   };
 }
 async function setup(t, options = {}) {
@@ -53,6 +57,26 @@ test("System settings runs DSH's settings.open command by id and leaves the page
   assert.equal(sc.invoked[0].context.modal, null, "never reported as 'inside a modal', which would CLOSE the dialog");
   assert.equal(sc.invoked[0].context.region, "page");
   assert.equal(app.isOpen(), false, "DSH's dialog sits under this page, so the page closes");
+});
+
+test("the entry shows when invoke is only reachable through the service's registry (DSH's real shape)", async t => {
+  const sc = shortcutsService({ shape: "registry" });
+  assert.equal(typeof sc.service.invoke, "undefined", "precondition: the service itself has no invoke");
+  const app = await setup(t, { services: { shortcuts: sc.service } });
+  assert.deepEqual(settingsButtons(app).map(n => n.props["data-settings-kind"]), ["system", "plugin"]);
+});
+
+test("a host that puts invoke on the service itself works too", async t => {
+  const sc = shortcutsService({ shape: "service" });
+  const app = await setup(t, { services: { shortcuts: sc.service } });
+  settingsButtons(app)[0].props.onClick();
+  await app.flush();
+  assert.equal(sc.invoked.length, 1);
+});
+
+test("a shortcut service with no way to run a command offers no System settings", async t => {
+  const app = await setup(t, { services: { shortcuts: { catalog: { getSnapshot: () => [{ id: "settings.open" }], subscribe: () => () => {} } } } });
+  assert.deepEqual(settingsButtons(app).map(n => n.props["data-settings-kind"]), ["plugin"]);
 });
 
 test("Plugin settings still opens the plugin's own settings page", async t => {
