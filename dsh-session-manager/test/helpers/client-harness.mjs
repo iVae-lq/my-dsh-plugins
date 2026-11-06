@@ -28,14 +28,14 @@ const clipboardStub = { writes: [], writeText(text) { this.writes.push(text); re
 /** Real, unmodified client bundle and registered slots, with a small hook host
  * to keep CI dependency-free. Tests exercise rendered controls, shared-store
  * subscriptions, async responses and the actual annotation editor. */
-export function mountClient({ sessions = [], current = "", archivedIds = [], workspaces = [], language = "zh", sessionCreatedAt = {}, fetchWorkspaces, sessionAnnotations = {}, fetchAnnotations, saveAnnotations, fetchUpdateCheck, fetchUpdateInstall, fetchUpdateStatus, fetchNpmLatest, fetchPresetScan, fetchPresets, migratePreset, fetchDeletePreview, shortcuts, confirm = () => true, wide = true, initialStorage = {}, innerWidth = 1200, innerHeight = 768, querySelector: customQuerySelector, services = {}, clientWorkspaces, sidebarPanels: initialSidebarPanels = [] } = {}) {
+export function mountClient({ sessions = [], current = "", archivedIds = [], workspaces = [], language = "zh", sessionCreatedAt = {}, fetchWorkspaces, sessionAnnotations = {}, fetchAnnotations, saveAnnotations, fetchUpdateCheck, fetchUpdateInstall, fetchUpdateStatus, fetchNpmLatest, fetchPresetScan, fetchPresets, migratePreset, fetchDeletePreview, shortcuts, confirm = () => true, wide = true, initialStorage = {}, innerWidth = 1200, innerHeight = 768, querySelector: customQuerySelector, services = {}, clientWorkspaces, sidebarPanels: initialSidebarPanels = [], querySelectorAll: customQuerySelectorAll, getElementById: customGetElementById } = {}) {
   // Fresh clipboard stub per mount so each test sees only its own writes.
   clipboardStub.writes.length = 0;
   let list = { ids: sessions.map(s => s.id), byId: Object.fromEntries(sessions.map(s => [s.id, s])), current };
   let workspaceSnapshot = { archivedSessionIds: archivedIds };
   let workspaceData = workspaces, response = fetchWorkspaces, annotationFetch = fetchAnnotations, annotationSave = saveAnnotations;
   let annotationData = Object.fromEntries(Object.entries(sessionAnnotations).map(([id, value]) => [id, { ...DEFAULT_ANNOTATION, revision: 1, ...value }]));
-  const requests = [], alerts = [], pluginCleanup = [];
+  const requests = [], alerts = [], pluginCleanup = [], intervals = [];
   // Portal calls made through React.createPortal. The stub returns the node
   // unchanged (so the rendered tree stays walkable) while recording the target
   // container, which is how tests assert that a document-level surface -- the
@@ -168,13 +168,19 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
   // documentElement.style.setProperty (e.g. --sm-panel-left,
   // --sm-dialog-opacity). Record them so tests can assert the live CSS state.
   const rootStyleValues = new Map();
+  // <html> attributes the bundle toggles (data-sm-panel-open, data-sm-host-modal, ...). Kept for
+  // real so tests can assert them; `api.rootAttributes` exposes the live set.
+  const rootAttributes = new Map();
   const documentElement = {
     dataset: {},
     style: {
       setProperty(name, value) { rootStyleValues.set(name, String(value)); },
       removeProperty(name) { rootStyleValues.delete(name); },
     },
-    getAttribute: () => "", setAttribute() {}, hasAttribute: () => false,
+    getAttribute: (name) => (rootAttributes.has(name) ? rootAttributes.get(name) : ""),
+    setAttribute(name, value) { rootAttributes.set(name, String(value)); },
+    removeAttribute(name) { rootAttributes.delete(name); },
+    hasAttribute: (name) => rootAttributes.has(name),
   };
   const element = (tag = "div") => {
     const children = [];
@@ -267,7 +273,7 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
   };
   const head = { appendChild(node) { if (node && node.dataset) styleTags.push(node); } };
   const body = element("body");
-  const document = { documentElement, body, head, querySelector: matchSelector, querySelectorAll: () => [], createElement: element, addEventListener() {}, removeEventListener() {} };
+  const document = { documentElement, body, head, querySelector: matchSelector, querySelectorAll: (selector) => (customQuerySelectorAll ? customQuerySelectorAll(selector) : []), getElementById: (id) => (customGetElementById ? customGetElementById(id) : null), createElement: element, addEventListener() {}, removeEventListener() {} };
   let exports;
   const window = {
     innerWidth, innerHeight, confirm, alert: message => alerts.push(message),
@@ -312,7 +318,8 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
   const navigator = { clipboard: clipboardStub };
   runInNewContext(source, {
     window, document, console, navigator, Error, AbortController, Event: (typeof Event !== "undefined" ? Event : class Event { constructor(t) { this.type = t; } }), localStorage: localStorageStub,
-    setInterval: () => 1, clearInterval() {}, setTimeout: () => 1, clearTimeout() {},
+    // Intervals never fire on their own; api.runIntervals() runs them once, in registration order.
+    setInterval: (fn) => { intervals.push(fn); return intervals.length; }, clearInterval(id) { intervals[id - 1] = null; }, setTimeout: () => 1, clearTimeout() {},
     getComputedStyle: () => ({ colorScheme: "light", backgroundColor: "rgb(255,255,255)" }),
     get __DSH_SM_TEST_UPDATE__() { return globalThis.__DSH_SM_TEST_UPDATE__; },
     set __DSH_SM_TEST_UPDATE__(v) { globalThis.__DSH_SM_TEST_UPDATE__ = v; },
@@ -531,6 +538,10 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
     mountComponent(component, props) { return host(component, props); },
     /** Close the panel and open it again (the component unmounts on close). */
     remountPanel,
+    /** Run every live setInterval callback once (they never fire on their own in the sandbox). */
+    runIntervals() { for (const fn of [...intervals]) if (typeof fn === "function") fn(); return api.flush(); },
+    /** Live <html> attributes set by the bundle (name -> value). */
+    get rootAttributes() { return rootAttributes; },
     /** Replace the sidebar's global-panel entries and notify subscribers, like a plugin loading late. */
     setSidebarPanels(next) { sidebarPanels = next; for (const fn of [...panelListeners]) fn(); panelHost.dirty = true; },
     /** Ids passed to layout.selectPanel(), in order (null = back to the conversation). */

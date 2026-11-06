@@ -37,7 +37,7 @@ test("the panel list sits above the Settings button, below the projects", async 
   const foot = nodes(app.tree[0], n => n.props?.className === "sm-ocSideFoot")[0];
   const kids = foot.props.children.flat().filter(Boolean);
   assert.equal(kids[0].props.className, "sm-ocPanels");
-  assert.equal(kids.at(-1).props.className, "sm-ocFootBtn", "Settings stays the last entry");
+  assert.equal(kids.at(-1).props.className, "sm-ocSettingsRow", "the settings row stays the last entry");
 });
 
 test("clicking a panel opens it through layout.selectPanel and leaves the page", async t => {

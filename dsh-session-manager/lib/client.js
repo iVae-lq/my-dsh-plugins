@@ -279,7 +279,8 @@ function isTopmostDialog(z) {
       "oc.group.earlier": "更早",
       "oc.openInTab": "已在标签页打开",
       "oc.shortcut.label": "打开会话管理",
-      "oc.settings": "设置",
+      "oc.settings": "插件设置",
+      "oc.systemSettings": "系统设置",
       "oc.panels": "DSH 功能面板",
       "oc.nativeMenu": "更多操作…",
       "oc.nativeMenu.aria": "打开 DSH 原生菜单（含其他插件提供的操作）",
@@ -672,7 +673,8 @@ function isTopmostDialog(z) {
       "oc.group.earlier": "Earlier",
       "oc.openInTab": "Open in a tab",
       "oc.shortcut.label": "Open session manager",
-      "oc.settings": "Settings",
+      "oc.settings": "Plugin settings",
+      "oc.systemSettings": "System settings",
       "oc.panels": "DSH panels",
       "oc.nativeMenu": "More actions…",
       "oc.nativeMenu.aria": "Open the DSH menu (includes actions from other plugins)",
@@ -1042,6 +1044,7 @@ function isTopmostDialog(z) {
       ".sm-ocIconBtn:hover,.sm-ocNew:hover:not(:disabled){background:var(--sm-oc-fill-hover);color:var(--dsw-alias-label-primary)}.sm-ocNew:disabled{opacity:.5;cursor:not-allowed}",
       ".sm-ocProjects{display:flex;flex-direction:column;flex:0 1 auto;gap:2px;min-width:0;min-height:0;overflow:auto}",
       ".sm-ocSideFoot{flex:none;display:flex;flex-direction:column;gap:2px;margin-top:28px;padding-bottom:16px}.sm-ocFootBtn svg{flex:none;color:var(--dsw-alias-label-secondary)}.sm-ocFootBtn{width:100%}",
+      ".sm-ocSettingsRow{display:flex;gap:2px;min-width:0}.sm-ocSettingsRow .sm-ocFootBtn{flex:1 1 0;width:auto;min-width:0;gap:6px;padding:0 6px}",
       ".sm-ocProjectItem,.sm-ocFootBtn{display:flex;align-items:center;gap:10px;min-width:0;height:32px;padding:0 8px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;line-height:18px;text-align:left;cursor:pointer;transition:background .12s,color .12s}",
       ".sm-ocProjectItem:hover,.sm-ocFootBtn:hover{background:var(--sm-oc-fill);color:var(--dsw-alias-label-primary)}.sm-ocProjectItem.sm-on{background:var(--sm-oc-fill-active);color:var(--dsw-alias-label-primary)}.sm-ocProjectItem:focus-visible,.sm-ocFootBtn:focus-visible{outline:1.5px solid color-mix(in srgb,var(--dsw-alias-label-primary,#888) 35%,transparent);outline-offset:-1.5px}",
       ".sm-ocProjectName{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
@@ -1078,6 +1081,7 @@ function isTopmostDialog(z) {
       ".sm-ocPanel .sm-ocProjects:not(:hover)::-webkit-scrollbar-thumb,.sm-ocPanel .sm-list:not(:hover)::-webkit-scrollbar-thumb{background-color:transparent}",
       // Right-click menu for a session row (portaled to the overlay root, above the page).
       "html[data-sm-panel-open] [data-context-menu]{z-index:100010!important}",
+      "html[data-sm-host-modal] #dsh-session-manager-overlay-root{z-index:900!important}",
       ".sm-ocCtxMenu{position:fixed;z-index:10000;box-sizing:border-box;min-width:176px;max-width:280px;padding:4px;border-radius:10px;border:.5px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));background:color-mix(in srgb,var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-base,#26262b)) 94%,transparent);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 8px 28px rgba(0,0,0,.28);color:var(--dsw-alias-label-primary,#111);font-size:13px;line-height:18px;user-select:none;-webkit-user-select:none}",
       ".sm-ocCtxItem{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;text-align:left;white-space:nowrap;cursor:pointer;outline:none}",
       ".sm-ocCtxItem:hover:not(:disabled),.sm-ocCtxItem:focus-visible{background:var(--dsw-alias-interactive-bg-hover)}.sm-ocCtxItem:disabled{opacity:.45;cursor:default}",
@@ -5233,6 +5237,26 @@ function isTopmostDialog(z) {
     };
     const lastBatchContext = { action: null, ids: [] };
 
+    // DSH's own modals (rename a session/workspace, delete confirmations, Settings...) are
+    // portaled to <body> at z-index 1000, while this plugin's overlay root sits at 1050 -- so a
+    // dialog opened from the panel (e.g. "Rename" in the native menu) rendered UNDER the panel's
+    // mask. While one is open the overlay root drops below it (see the `data-sm-host-modal` rule),
+    // and the panel treats clicks / Esc as belonging to that dialog. DSH's keyboard layer finds
+    // modals the same way (role=dialog + aria-modal=true); this plugin's own dialogs live inside
+    // the overlay root and are not "host" modals.
+    const HOST_MODAL_ATTR = "data-sm-host-modal";
+    const hostModalSelector = () => (typeof P.modalSelector === "string" && P.modalSelector) || "[role=\"dialog\"][aria-modal=\"true\"]";
+    const isHostModalOpen = () => {
+      try {
+        if (typeof document === "undefined" || typeof document.querySelectorAll !== "function") return false;
+        const root = typeof document.getElementById === "function" ? document.getElementById("dsh-session-manager-overlay-root") : null;
+        for (const node of document.querySelectorAll(hostModalSelector())) {
+          if (!(root && typeof root.contains === "function" && root.contains(node))) return true;
+        }
+      } catch (_) { /* a DOM without querySelectorAll: no host modal to yield to */ }
+      return false;
+    };
+
     // Global panels of the DSH sidebar (see globalPanelsStore). A frozen constant so an empty
     // source never hands useSyncExternalStore a new snapshot on every render.
     const EMPTY_GLOBAL_PANELS = Object.freeze([]);
@@ -5331,6 +5355,9 @@ function isTopmostDialog(z) {
       const onMigrate = props.onMigrate;
       const onNewSession = props.onNewSession;
       const onAddProject = props.onAddProject;
+      // DSH's own Settings dialog; offered only when the host can open it (see actions()).
+      const onOpenSystemSettings = typeof props.onOpenSystemSettings === "function" ? props.onOpenSystemSettings : null;
+      const systemSettingsOk = onOpenSystemSettings !== null && typeof props.canOpenSystemSettings === "function" && props.canOpenSystemSettings() === true;
       const onOpenGlobalPanel = typeof props.onOpenGlobalPanel === "function" ? props.onOpenGlobalPanel : null;
       const panelEntriesStore = props.panelEntries;
       const globalPanels = useSyncExternalStore(
@@ -6459,6 +6486,8 @@ function isTopmostDialog(z) {
           // DSH's own menu (opened from "More actions…" / a right-click) handles Esc itself;
           // closing the whole panel underneath it would be one Esc too many.
           if (typeof s.isNativeMenuOpen === "function" && s.isNativeMenuOpen()) return;
+          // Likewise a DSH dialog opened from this page (rename...): Esc belongs to it.
+          if (isHostModalOpen()) return;
           e.preventDefault();
           e.stopPropagation();
           s.onPanelClose();
@@ -6483,6 +6512,8 @@ function isTopmostDialog(z) {
           if (s.bulkPreview || s.bulkProgress || s.bulkResult || s.bulkTagDraft || s.bulkPresetDraft) return;
           if (typeof updateStore !== "undefined" && updateStore && typeof updateStore.getSnapshot === "function" && updateStore.getSnapshot()?.dialogOpen) return;
           if (activeDialogZStack && activeDialogZStack.length > 0) return;
+          // A DSH dialog (rename...) is above this page: clicks in it are not clicks outside the page.
+          if (isHostModalOpen()) return;
           // A control that unmounts while it is clicked (e.g. "reset filters" disappears once
           // the filters are cleared) is already detached when this window-level listener runs,
           // so `contains`/`closest` on e.target miss it and the whole page used to close.
@@ -6515,6 +6546,35 @@ function isTopmostDialog(z) {
         const root = document.documentElement;
         try { root.setAttribute("data-sm-panel-open", ""); } catch (_) {}
         return () => { try { root.removeAttribute?.("data-sm-panel-open"); } catch (_) {} };
+      }, [open]);
+      // 宿主的模态框（重命名、删除确认、DSH 设置……）层级是 1000，比本插件 overlay 的 1050 低，
+      // 从面板里触发时会被面板遮罩盖住。面板打开期间监视它：出现时给 <html> 打标，CSS 把
+      // overlay 降到它下面；它关闭后恢复。<body> 的直接子节点变化触发即时检查（模态框都是
+      // portal 到 body 的），轮询兜底 portal 到别处的情况。
+      useEffect(() => {
+        if (!open) return;
+        const root = document.documentElement;
+        let yielded = false;
+        const sync = () => {
+          const next = isHostModalOpen();
+          if (next === yielded) return;
+          yielded = next;
+          try { if (next) root.setAttribute(HOST_MODAL_ATTR, ""); else root.removeAttribute?.(HOST_MODAL_ATTR); } catch (_) {}
+        };
+        sync();
+        let observer = null;
+        try {
+          if (typeof MutationObserver === "function" && document.body) {
+            observer = new MutationObserver(sync);
+            observer.observe(document.body, { childList: true });
+          }
+        } catch (_) { observer = null; }
+        const timer = setInterval(sync, 400);
+        return () => {
+          try { if (observer) observer.disconnect(); } catch (_) {}
+          try { clearInterval(timer); } catch (_) {}
+          try { root.removeAttribute?.(HOST_MODAL_ATTR); } catch (_) {}
+        };
       }, [open]);
       // 打开面板时把焦点放到当前页签的搜索框：直接开始打字就能筛选。
       // 面板从 shell.overlay / 侧栏按钮打开，焦点原本停在那个按钮上；
@@ -6811,14 +6871,28 @@ function isTopmostDialog(z) {
                       h("span", { className: "sm-ocProjectName" }, entry.label)
                     ))
                   ) : null,
-                  h("button", {
-                    type: "button", className: "sm-ocFootBtn",
-                    onClick: () => setPanelTab("settings")
-                  },
-                    h("svg", { viewBox: "0 0 16 16", width: 16, height: 16, fill: "none", stroke: "currentColor", strokeWidth: 1.2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" },
-                      h("circle", { cx: 8, cy: 8, r: 2.1 }),
-                      h("path", { d: "M8 1.8v1.5M8 12.7v1.5M14.2 8h-1.5M3.3 8H1.8M12.4 3.6l-1.06 1.06M4.66 11.34 3.6 12.4M12.4 12.4l-1.06-1.06M4.66 4.66 3.6 3.6" })),
-                    h("span", { className: "sm-ocProjectName" }, t("oc.settings")))
+                  // One row, two settings: DSH's own (left) and this plugin's (right).
+                  h("div", { className: "sm-ocSettingsRow" },
+                    systemSettingsOk ? h("button", {
+                      type: "button", className: "sm-ocFootBtn", "data-settings-kind": "system",
+                      title: t("oc.systemSettings"),
+                      onClick: () => onOpenSystemSettings()
+                    },
+                      h("svg", { viewBox: "0 0 16 16", width: 16, height: 16, fill: "none", stroke: "currentColor", strokeWidth: 1.2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" },
+                        h("circle", { cx: 8, cy: 8, r: 2.1 }),
+                        h("path", { d: "M8 1.8v1.5M8 12.7v1.5M14.2 8h-1.5M3.3 8H1.8M12.4 3.6l-1.06 1.06M4.66 11.34 3.6 12.4M12.4 12.4l-1.06-1.06M4.66 4.66 3.6 3.6" })),
+                      h("span", { className: "sm-ocProjectName" }, t("oc.systemSettings"))) : null,
+                    h("button", {
+                      type: "button", className: "sm-ocFootBtn", "data-settings-kind": "plugin",
+                      title: t("oc.settings"),
+                      onClick: () => setPanelTab("settings")
+                    },
+                      h("svg", { viewBox: "0 0 16 16", width: 16, height: 16, fill: "none", stroke: "currentColor", strokeWidth: 1.2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" },
+                        h("path", { d: "M2 4.5h6.2M11.2 4.5H14M2 11.5h2.8M7.8 11.5H14" }),
+                        h("circle", { cx: 9.7, cy: 4.5, r: 1.5 }),
+                        h("circle", { cx: 6.3, cy: 11.5, r: 1.5 })),
+                      h("span", { className: "sm-ocProjectName" }, t("oc.settings")))
+                  )
                 )
               ),
               h("div", { className: "sm-ocMainHead" },
@@ -7617,6 +7691,14 @@ function isTopmostDialog(z) {
           onMove: this.props.props?.onMove,
           onMigrate: this.props.props?.onMigrate,
           onNewSession: (workspaceId, workspacePath) => { try { this.props.panelStore.set(false); this.props.props?.onNewSession?.(workspaceId, workspacePath); } catch (_) {} },
+          canOpenSystemSettings: this.props.props?.canOpenSystemSettings,
+          // DSH's Settings dialog sits below this page, so the page closes as it opens.
+          onOpenSystemSettings: () => {
+            try {
+              const opened = this.props.props?.onOpenSystemSettings?.();
+              if (opened !== false) this.props.panelStore.set(false);
+            } catch (_) {}
+          },
           panelEntries: this.props.props?.panelEntries,
           // Open DSH's panel first, then leave this page so it does not cover it. A host without
           // the layout service reports false and the page stays put.
@@ -8443,6 +8525,31 @@ function isTopmostDialog(z) {
           }, 250);
         },
         onOpenPanel: () => panelStore.toggle(),
+        // DSH's own Settings dialog. Its opener is private to the sidebar, but the dialog is the
+        // `settings.open` shortcut command, and the shortcut service can run a command by id the
+        // way a native menu selection does (independent of any key binding, which on the desktop
+        // app are handled natively and cannot be triggered by a synthetic key event).
+        canOpenSystemSettings: () => {
+          const shortcuts = optionalService("shortcuts");
+          if (!shortcuts || typeof shortcuts.invoke !== "function") return false;
+          try {
+            const rows = shortcuts.catalog && typeof shortcuts.catalog.getSnapshot === "function" ? shortcuts.catalog.getSnapshot() : undefined;
+            if (Array.isArray(rows)) return rows.some((row) => row && row.id === "settings.open");
+          } catch (_) { /* unreadable catalog: try anyway */ }
+          return true;
+        },
+        onOpenSystemSettings: () => {
+          const shortcuts = optionalService("shortcuts");
+          if (!shortcuts || typeof shortcuts.invoke !== "function") return false;
+          try {
+            // modal:null so the command opens the dialog instead of closing a modal that is "on top".
+            shortcuts.invoke("settings.open", { target: typeof document !== "undefined" ? document.body : null, region: "page", modal: null });
+            return true;
+          } catch (error) {
+            console.error("session-manager: opening DSH settings failed", error);
+            return false;
+          }
+        },
         // Global panels (Plugins, Scheduled tasks, ...) listed in the project column. Opening one
         // leaves this page for DSH's own panel, so the caller closes the page afterwards.
         panelEntries: globalPanelsStore,

@@ -74,7 +74,7 @@ test("reopening restores the workspaces tab and its own query", async t => {
 test("the settings page is not restored; reopening lands on a searchable tab", async t => {
   const app = await setup(t);
   await app.click("会话管理");
-  await app.click("设置");
+  await app.click("插件设置");
   await app.remountPanel();
 
   // The settings page has no search box, so restoring it would leave the panel
