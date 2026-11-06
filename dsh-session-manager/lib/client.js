@@ -5225,7 +5225,40 @@ function isTopmostDialog(z) {
     };
     const lastBatchContext = { action: null, ids: [] };
 
+    // ── 面板视图状态记忆 ───────────────────────────────────────────────────
+    // 面板关闭时 SafePanel 整个卸载，「上次看到的筛选 / 搜索」只活在组件的
+    // useState 里会一起丢掉。这里把它们提到模块级（页面存活期间有效，不写
+    // localStorage）：重新打开时按上次的值初始化，读到就能接着看。
+    // 一次性状态（多选、批量进度、当前打开的弹窗）不记，关掉就该清空。
     const DEFAULT_SORT = "updated-desc";
+    const PANEL_VIEW_DEFAULTS = Object.freeze({
+      panelTab: "sessions",
+      query: "",
+      filter: "all",
+      workspaceFilter: "all",
+      sortOrder: DEFAULT_SORT,
+      onlyFavorite: false,
+      onlyReview: false,
+      tagFilter: "all",
+      priorityFilter: "all",
+      wsQuery: "",
+      wsFilter: "all",
+      wsSort: DEFAULT_SORT
+    });
+    const panelViewMemory = { ...PANEL_VIEW_DEFAULTS };
+    /** 读一个记忆值；值被外部改坏（类型不符）时退回默认值。 */
+    const recalledView = (key) => {
+      const value = panelViewMemory[key];
+      const fallback = PANEL_VIEW_DEFAULTS[key];
+      return typeof value === typeof fallback ? value : fallback;
+    };
+    const rememberView = (key, value) => { panelViewMemory[key] = value; };
+    /** 恢复页签：设置页是临时跳转，重新打开时回到会话页，保证有搜索框可聚焦。 */
+    const recallPanelTab = () => {
+      const tab = recalledView("panelTab");
+      return tab === "workspaces" ? "workspaces" : "sessions";
+    };
+
     const SORT_ORDERS = ["updated-desc", "updated-asc", "created-desc", "created-asc", "name-asc", "name-desc", "priority"];
     const workspaceValue = (id) => "workspace:" + id;
     const sessionTime = (value) => {
@@ -5297,20 +5330,37 @@ function isTopmostDialog(z) {
         () => updateStore.getSnapshot(),
         () => updateStore.getSnapshot()
       );
-      const [onlyFavorite, setOnlyFavorite] = useState(false);
-      const [onlyReview, setOnlyReview] = useState(false);
-      const [tagFilter, setTagFilter] = useState("all");
-      const [priorityFilter, setPriorityFilter] = useState("all");
+      const [onlyFavorite, setOnlyFavoriteState] = useState(() => recalledView("onlyFavorite"));
+      const [onlyReview, setOnlyReviewState] = useState(() => recalledView("onlyReview"));
+      const [tagFilter, setTagFilterState] = useState(() => recalledView("tagFilter"));
+      const [priorityFilter, setPriorityFilterState] = useState(() => recalledView("priorityFilter"));
+      // 视图状态统一走「设置并记忆」，关闭再打开才能回到原样。
+      // 支持传入更新函数（如 onClick: () => setOnlyFavorite(v => !v)）。
+      // 记忆在更新函数之外写：React 允许把函数传给 setState 时调用两次，
+      // 写在里面会重复执行。
+      const rememberableSetter = (setState, key, current) => (next) => {
+        const value = typeof next === "function" ? next(current) : next;
+        rememberView(key, value);
+        setState(value);
+      };
+      const setOnlyFavorite = rememberableSetter(setOnlyFavoriteState, "onlyFavorite", onlyFavorite);
+      const setOnlyReview = rememberableSetter(setOnlyReviewState, "onlyReview", onlyReview);
+      const setTagFilter = rememberableSetter(setTagFilterState, "tagFilter", tagFilter);
+      const setPriorityFilter = rememberableSetter(setPriorityFilterState, "priorityFilter", priorityFilter);
       const [annotationFor, setAnnotationFor] = useState(null);
       const [annotationAnchor, setAnnotationAnchor] = useState(null);
       const [ctxMenu, setCtxMenu] = useState(null);
       const list = (typeof useSessions === "function" ? useSessions((s) => s) : null) || { ids: [], byId: {} };
       const workspaceSnapshot = (typeof useWorkspaces === "function" ? useWorkspaces((s) => s) : null) || { items: [] };
       const archivedIds = workspaceSnapshot.archivedSessionIds || [];
-      const [panelTab, setPanelTab] = useState("sessions");
-      const [wsQuery, setWsQuery] = useState("");
-      const [wsFilter, setWsFilter] = useState("all");
-      const [wsSort, setWsSort] = useState("updated-desc");
+      const [panelTab, setPanelTabState] = useState(() => recallPanelTab());
+      const [wsQuery, setWsQueryState] = useState(() => recalledView("wsQuery"));
+      const [wsFilter, setWsFilterState] = useState(() => recalledView("wsFilter"));
+      const [wsSort, setWsSortState] = useState(() => recalledView("wsSort"));
+      const setPanelTab = rememberableSetter(setPanelTabState, "panelTab", panelTab);
+      const setWsQuery = rememberableSetter(setWsQueryState, "wsQuery", wsQuery);
+      const setWsFilter = rememberableSetter(setWsFilterState, "wsFilter", wsFilter);
+      const setWsSort = rememberableSetter(setWsSortState, "wsSort", wsSort);
       const [wsSelectedIds, setWsSelectedIds] = useState(() => new Set());
       const [wsSelectModeEnabled, setWsSelectModeEnabled] = useState(false);
       const [wsBulkBusy, setWsBulkBusy] = useState(false);
@@ -5320,10 +5370,14 @@ function isTopmostDialog(z) {
         () => workspaceArchiveStore.getVersion(),
         () => workspaceArchiveStore.getVersion()
       );
-      const [filter, setFilter] = useState("all");
-      const [query, setQuery] = useState("");
-      const [workspaceFilter, setWorkspaceFilter] = useState("all");
-      const [sortOrder, setSortOrder] = useState(DEFAULT_SORT);
+      const [filter, setFilterState] = useState(() => recalledView("filter"));
+      const [query, setQueryState] = useState(() => recalledView("query"));
+      const [workspaceFilter, setWorkspaceFilterState] = useState(() => recalledView("workspaceFilter"));
+      const [sortOrder, setSortOrderState] = useState(() => recalledView("sortOrder"));
+      const setFilter = rememberableSetter(setFilterState, "filter", filter);
+      const setQuery = rememberableSetter(setQueryState, "query", query);
+      const setWorkspaceFilter = rememberableSetter(setWorkspaceFilterState, "workspaceFilter", workspaceFilter);
+      const setSortOrder = rememberableSetter(setSortOrderState, "sortOrder", sortOrder);
       const [busyId, setBusyId] = useState(null);
       const [error, setError] = useState(null);
       const [now, setNow] = useState(() => Date.now());
@@ -6314,6 +6368,8 @@ function isTopmostDialog(z) {
       // returns early when any inner dialog is open so the child
       // dialog's own window listener gets the first shot at Esc.
       const panelRef = useRef(null);
+      const searchInputRef = useRef(null);
+      const wsSearchInputRef = useRef(null);
       const escStateRef = useRef({});
       escStateRef.current = {
         busyId,
@@ -6387,6 +6443,36 @@ function isTopmostDialog(z) {
           window.removeEventListener("click", clickHandler);
         };
       }, [open]);
+      // 打开面板时把焦点放到当前页签的搜索框：直接开始打字就能筛选。
+      // 面板从 shell.overlay / 侧栏按钮打开，焦点原本停在那个按钮上；
+      // 搜索框是面板的主入口，聚焦它也让 Esc 之后的 Tab 顺序从面板内部开始。
+      // 有内层弹窗（移动 / 删除 / 迁移 / 标注 / 批量）时不动焦点，让弹窗自己
+      // 的 autoFocus 生效。等动画帧之后再做，避免和面板的进场动画抢焦点。
+      useEffect(() => {
+        if (!open) return;
+        const target = panelTab === "workspaces" ? wsSearchInputRef.current : searchInputRef.current;
+        if (!target || typeof target.focus !== "function") return;
+        let cancelled = false;
+        const frame = raf(() => {
+          if (cancelled) return;
+          // 有内层弹窗时不抢焦点：它们自己带 autoFocus，且都是 portal 到
+          // overlay root 的，用 DOM 包含关系判断不出来，只能读状态。
+          const s = escStateRef.current;
+          if (s.confirmFor || s.moveFor || s.migrateFor || s.annotationFor) return;
+          if (s.bulkPreview || s.bulkProgress || s.bulkResult || s.bulkTagDraft || s.bulkPresetDraft) return;
+          if (typeof updateStore !== "undefined" && updateStore && typeof updateStore.getSnapshot === "function" && updateStore.getSnapshot()?.dialogOpen) return;
+          try { target.focus({ preventScroll: true }); } catch (_) { try { target.focus(); } catch (_) {} }
+          // 已有内容时把光标放到末尾，直接续写而不是全选覆盖
+          try {
+            const end = typeof target.value === "string" ? target.value.length : 0;
+            if (end > 0 && typeof target.setSelectionRange === "function") target.setSelectionRange(end, end);
+          } catch (_) {}
+        });
+        return () => {
+          cancelled = true;
+          try { caf(frame); } catch (_) {}
+        };
+      }, [open, panelTab]);
       // The panel is a document-level floating window, so it is portaled into
       // the plugin's overlay root like every other dialog here (issue #28).
       // Rendering it inside the sidebar slot confined it: the sidebar -- and,
@@ -6509,6 +6595,7 @@ function isTopmostDialog(z) {
                   h("svg", { viewBox: "0 0 16 16", width: 16, height: 16, fill: "none", stroke: "currentColor", strokeWidth: 1.3, strokeLinecap: "round", "aria-hidden": "true" },
                     h("circle", { cx: 7, cy: 7, r: 4.6 }), h("path", { d: "m10.5 10.5 3 3" })),
                   h("input", {
+                    ref: wsSearchInputRef,
                     type: "search", className: "sm-queryInput", value: wsQuery,
                     placeholder: t("workspace.search"), "aria-label": t("workspace.search"), autoComplete: "off",
                     onChange: event => setWsQuery(event.target.value)
@@ -6611,6 +6698,7 @@ function isTopmostDialog(z) {
                 h("svg", { viewBox: "0 0 16 16", width: 16, height: 16, fill: "none", stroke: "currentColor", strokeWidth: 1.3, strokeLinecap: "round", "aria-hidden": "true" },
                   h("circle", { cx: 7, cy: 7, r: 4.6 }), h("path", { d: "m10.5 10.5 3 3" })),
                 h("input", {
+                  ref: searchInputRef,
                   type: "search", className: "sm-queryInput", value: query,
                   placeholder: t("oc.searchPlaceholder"), title: t("panel.search"), "aria-label": t("panel.search"), autoComplete: "off",
                   onChange: event => setQuery(event.target.value)

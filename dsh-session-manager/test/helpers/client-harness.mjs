@@ -48,6 +48,10 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
   const sessionOpenCalls = [];
   const clearMainCalls = [];
   const refreshCalls = [];
+  // Elements that received .focus(), in order, keyed by their aria-label (or
+  // className). The bundle focuses the panel's search box on open; tests assert
+  // that through this list because the stub DOM has no real focus model.
+  const focusedLabels = [];
   const sameDeps = (a, b) => a && b && a.length === b.length && a.every((value, index) => Object.is(value, b[index]));
   const hook = () => {
     if (!activeHost) throw new Error("Hook called outside render");
@@ -64,6 +68,13 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
           vnode,
           tagName: typeof type === "string" ? type.toUpperCase() : "DIV",
           getBoundingClientRect: () => ({ top: 100, left: 100, bottom: 130, right: 130, width: 30, height: 30 }),
+          // The bundle focuses the panel search box on open. Record it so tests
+          // can assert focus without a real focus model in the stub DOM.
+          focus() {
+            focusedLabels.push(props?.["aria-label"] ?? props?.className ?? "");
+            return true;
+          },
+          setSelectionRange() {},
           contains(target) {
             if (!target) return false;
             if (target === this || target === vnode) return true;
@@ -427,7 +438,17 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
   const footerHost = host(footer.component, { ...actions, ...common, wide });
   const safePanel = nodes(footerHost.tree, node => typeof node.type === "function" && node.type.prototype?.render)[0];
   const panel = new safePanel.type(safePanel.props).render();
-  const panelHost = host(panel.type, panel.props);
+  let panelHost = host(panel.type, panel.props);
+  // Closing the panel unmounts SessionManagerPanel entirely (SafePanel renders it
+  // only while open), so view-state memory has to live outside the component.
+  // remountPanel() reproduces that close/reopen cycle: dispose the current host
+  // and build a fresh one from the same SafePanel output.
+  const remountPanel = async () => {
+    panelHost.dispose();
+    const next = new safePanel.type(safePanel.props).render();
+    panelHost = host(next.type, next.props);
+    return api.flush();
+  };
   let headerHost, dialogHost, dialogKey, menuHost;
   // The row context menu is its own component (SessionContextMenu); host it like the
   // annotation dialog so its items are part of api.tree.
@@ -481,6 +502,10 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
     /** Every React.createPortal(node, container) call, in order. */
     get portals() { return portals; },
     mountComponent(component, props) { return host(component, props); },
+    /** Close the panel and open it again (the component unmounts on close). */
+    remountPanel,
+    /** aria-labels of every element that received .focus(), in order. */
+    get focusedLabels() { return [...focusedLabels]; },
     get requests() { return requests; }, get workspaceRequests() { return requests.filter(r => r.url.endsWith("/workspaces")); },
     get sourceIds() { return list.ids; }, get annotations() { return annotationData; }, get alerts() { return alerts; },
     async flush() {
