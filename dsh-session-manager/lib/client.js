@@ -280,6 +280,9 @@ function isTopmostDialog(z) {
       "oc.openInTab": "已在标签页打开",
       "oc.shortcut.label": "打开会话管理",
       "oc.settings": "设置",
+      "oc.panels": "DSH 功能面板",
+      "oc.nativeMenu": "更多操作…",
+      "oc.nativeMenu.aria": "打开 DSH 原生菜单（含其他插件提供的操作）",
       "oc.titleButton": "会话",
       "panel.close": "关闭",
       "row.open": "打开",
@@ -670,6 +673,9 @@ function isTopmostDialog(z) {
       "oc.openInTab": "Open in a tab",
       "oc.shortcut.label": "Open session manager",
       "oc.settings": "Settings",
+      "oc.panels": "DSH panels",
+      "oc.nativeMenu": "More actions…",
+      "oc.nativeMenu.aria": "Open the DSH menu (includes actions from other plugins)",
       "oc.titleButton": "Sessions",
       "panel.close": "Close",
       "row.open": "Open",
@@ -1039,6 +1045,7 @@ function isTopmostDialog(z) {
       ".sm-ocProjectItem,.sm-ocFootBtn{display:flex;align-items:center;gap:10px;min-width:0;height:32px;padding:0 8px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;line-height:18px;text-align:left;cursor:pointer;transition:background .12s,color .12s}",
       ".sm-ocProjectItem:hover,.sm-ocFootBtn:hover{background:var(--sm-oc-fill);color:var(--dsw-alias-label-primary)}.sm-ocProjectItem.sm-on{background:var(--sm-oc-fill-active);color:var(--dsw-alias-label-primary)}.sm-ocProjectItem:focus-visible,.sm-ocFootBtn:focus-visible{outline:1.5px solid color-mix(in srgb,var(--dsw-alias-label-primary,#888) 35%,transparent);outline-offset:-1.5px}",
       ".sm-ocProjectName{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+      ".sm-ocPanels{display:flex;flex-direction:column;gap:2px;max-height:min(220px,30vh);overflow:auto;margin-bottom:6px;padding-bottom:6px;border-bottom:.5px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28))}.sm-ocPanelGlyph{flex:none;width:16px;height:16px;display:inline-grid;place-items:center;color:var(--dsw-alias-label-secondary)}.sm-ocPanelGlyph svg{width:16px;height:16px}.sm-ocPanelItem:hover .sm-ocPanelGlyph{color:var(--dsw-alias-label-primary)}",
       ".sm-ocBadge{flex:none;width:16px;height:16px;border-radius:4px;display:inline-grid;place-items:center;background:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 34%,transparent);color:var(--dsw-alias-label-primary,#fff);font-size:10px;font-weight:700;line-height:1;text-transform:uppercase}",
       ".sm-ocProjectItem.sm-on .sm-ocBadge{background:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 52%,transparent)}",
       ".sm-ocMainHead{grid-column:2;grid-row:2;display:flex;justify-content:flex-end;align-items:center;height:28px;margin-bottom:8px}",
@@ -1070,6 +1077,7 @@ function isTopmostDialog(z) {
       ".sm-ocPanel .sm-ocProjects::-webkit-scrollbar-thumb:hover,.sm-ocPanel .sm-list::-webkit-scrollbar-thumb:hover{background-color:color-mix(in srgb,var(--dsw-alias-label-primary,#888) 42%,transparent);background-clip:padding-box}",
       ".sm-ocPanel .sm-ocProjects:not(:hover)::-webkit-scrollbar-thumb,.sm-ocPanel .sm-list:not(:hover)::-webkit-scrollbar-thumb{background-color:transparent}",
       // Right-click menu for a session row (portaled to the overlay root, above the page).
+      "html[data-sm-panel-open] [data-context-menu]{z-index:100010!important}",
       ".sm-ocCtxMenu{position:fixed;z-index:10000;box-sizing:border-box;min-width:176px;max-width:280px;padding:4px;border-radius:10px;border:.5px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));background:color-mix(in srgb,var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-base,#26262b)) 94%,transparent);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 8px 28px rgba(0,0,0,.28);color:var(--dsw-alias-label-primary,#111);font-size:13px;line-height:18px;user-select:none;-webkit-user-select:none}",
       ".sm-ocCtxItem{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;text-align:left;white-space:nowrap;cursor:pointer;outline:none}",
       ".sm-ocCtxItem:hover:not(:disabled),.sm-ocCtxItem:focus-visible{background:var(--dsw-alias-interactive-bg-hover)}.sm-ocCtxItem:disabled{opacity:.45;cursor:default}",
@@ -5225,6 +5233,24 @@ function isTopmostDialog(z) {
     };
     const lastBatchContext = { action: null, ids: [] };
 
+    // Global panels of the DSH sidebar (see globalPanelsStore). A frozen constant so an empty
+    // source never hands useSyncExternalStore a new snapshot on every render.
+    const EMPTY_GLOBAL_PANELS = Object.freeze([]);
+
+    // A panel's glyph is the component its plugin registered for the sidebar. It is drawn here
+    // outside the sidebar's own slot machinery, so a glyph that depends on injected props can
+    // throw; the boundary then shows a letter badge instead and the row stays usable.
+    class GlobalPanelGlyph extends React.Component {
+      constructor(props) { super(props); this.state = { failed: false }; }
+      static getDerivedStateFromError() { return { failed: true }; }
+      componentDidCatch(error) { try { console.warn("[dsh-session-manager] panel icon failed to render:", error); } catch (_) {} }
+      render() {
+        const { icon, label } = this.props;
+        if (icon && !this.state.failed) return h(icon, { size: 16, active: false });
+        return h("span", { className: "sm-ocBadge", "aria-hidden": "true" }, String(label || "?").trim().charAt(0).toUpperCase() || "?");
+      }
+    }
+
     // ── 面板视图状态记忆 ───────────────────────────────────────────────────
     // 面板关闭时 SafePanel 整个卸载，「上次看到的筛选 / 搜索」只活在组件的
     // useState 里会一起丢掉。这里把它们提到模块级（页面存活期间有效，不写
@@ -5305,6 +5331,16 @@ function isTopmostDialog(z) {
       const onMigrate = props.onMigrate;
       const onNewSession = props.onNewSession;
       const onAddProject = props.onAddProject;
+      const onOpenGlobalPanel = typeof props.onOpenGlobalPanel === "function" ? props.onOpenGlobalPanel : null;
+      const panelEntriesStore = props.panelEntries;
+      const globalPanels = useSyncExternalStore(
+        (cb) => (panelEntriesStore && typeof panelEntriesStore.subscribe === "function" ? panelEntriesStore.subscribe(cb) : () => {}),
+        () => (panelEntriesStore && typeof panelEntriesStore.getSnapshot === "function" ? panelEntriesStore.getSnapshot() : EMPTY_GLOBAL_PANELS),
+        () => (panelEntriesStore && typeof panelEntriesStore.getSnapshot === "function" ? panelEntriesStore.getSnapshot() : EMPTY_GLOBAL_PANELS)
+      );
+      const onNativeMenu = typeof props.onNativeMenu === "function" ? props.onNativeMenu : null;
+      // The native menu needs DSH's context-menu service; without it every entry point below is hidden.
+      const nativeMenuOk = onNativeMenu !== null && typeof props.canNativeMenu === "function" && props.canNativeMenu() === true;
       const defaultUseSessions = (selector = s => s) => {
         const model = activeClientCtx?.sessions?.list;
         return useSyncExternalStore(
@@ -5925,14 +5961,28 @@ function isTopmostDialog(z) {
         return { key: "earlier", label: t("oc.group.earlier") };
       };
       const hasUngroupedRows = allRows.some(session => rowWorkspaces(session, workspaceIndex).size === 0);
-      const renderProjectItem = (value, label, title) => h("button", {
+      // Right-click -> DSH's native workspace menu (rename, show in folder, delete, plus whatever
+      // other plugins contribute, e.g. dsh-sidebar-row-menu). `workspace` is this plugin's own
+      // record; the handler maps it to DSH's workspace id.
+      const nativeWorkspaceMenuProps = (workspace) => {
+        if (!nativeMenuOk || !workspace) return {};
+        return {
+          onContextMenu: (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onNativeMenu("workspace", { workspaceId: workspace.id, path: workspace.path, displayTitle: workspace.title || workspace.name || workspace.id }, { x: e.clientX, y: e.clientY });
+          }
+        };
+      };
+      const renderProjectItem = (value, label, title, workspace) => h("button", {
         key: value,
         type: "button",
         className: "sm-ocProjectItem" + (workspaceFilter === value ? " sm-on" : ""),
         "aria-pressed": workspaceFilter === value,
         title: title || label,
         // Selected -> only this project's sessions; click again to deselect -> all sessions.
-        onClick: () => setWorkspaceFilter(current => current === value ? "all" : value)
+        onClick: () => setWorkspaceFilter(current => current === value ? "all" : value),
+        ...nativeWorkspaceMenuProps(workspace)
       },
         h("span", { className: "sm-ocBadge", "aria-hidden": "true" }, String(label || "?").trim().charAt(0).toUpperCase() || "?"),
         h("span", { className: "sm-ocProjectName" }, label)
@@ -6289,7 +6339,8 @@ function isTopmostDialog(z) {
         return h("div", {
           key: ws.id,
           "data-workspace-id": ws.id,
-          className: "sm-row sm-workspaceRow" + (isArchived ? " sm-rowArchived" : "") + (isWsSelected ? " sm-rowBulkSelected" : "")
+          className: "sm-row sm-workspaceRow" + (isArchived ? " sm-rowArchived" : "") + (isWsSelected ? " sm-rowBulkSelected" : ""),
+          ...nativeWorkspaceMenuProps(ws)
         },
           h("div", { className: "sm-rowCheckboxSlot" + ((wsSelectedIds.size > 0 || wsSelectModeEnabled) ? " sm-rowCheckboxSlot-visible" : "") }, checkbox),
           h("div", { className: "sm-rowMain" },
@@ -6316,7 +6367,7 @@ function isTopmostDialog(z) {
 
       // Right-click menu: every per-session action lives here (left click opens).
       const closeCtxMenu = useMemo(() => () => setCtxMenu(null), []);
-      const buildCtxItems = (s) => {
+      const buildCtxItems = (s, point) => {
         const isArchived = archived.has(s.id);
         const isWsArchived = isSessionWorkspaceArchived(s);
         const mark = annotationOf(annotations, s.id);
@@ -6348,10 +6399,17 @@ function isTopmostDialog(z) {
           { key: "move", icon: HeaderMoveIcon(), label: t("row.move"), ariaLabel: t("row.move") + ": " + sTitle, disabled: rowBusy, run: () => setMoveFor(s) },
           { key: "migrate", label: t("row.migrate"), ariaLabel: t("row.migrate") + ": " + sTitle, disabled: rowBusy, run: () => setMigrateFor(s) },
           { key: "sep-2", separator: true },
-          { key: "delete", icon: HeaderTrashIcon(), label: t("row.delete"), ariaLabel: t("row.delete") + ": " + sTitle, danger: true, disabled: rowBusy, run: () => setConfirmFor(s) }
+          { key: "delete", icon: HeaderTrashIcon(), label: t("row.delete"), ariaLabel: t("row.delete") + ": " + sTitle, danger: true, disabled: rowBusy, run: () => setConfirmFor(s) },
+          // DSH's own session menu (rename, fork, pin, open with…, and whatever other plugins such as
+          // dsh-sidebar-row-menu add), opened where this menu was. Kept as one trailing entry so the
+          // panel-specific actions above stay exactly as they were.
+          ...(nativeMenuOk && point ? [
+            { key: "sep-native", separator: true },
+            { key: "native", label: t("oc.nativeMenu"), ariaLabel: t("oc.nativeMenu.aria") + ": " + sTitle, run: () => onNativeMenu("session", { sessionId: s.id, displayTitle: sTitle }, point) }
+          ] : [])
         ];
       };
-      const ctxMenuNode = ctxMenu ? h(SessionContextMenu, { key: "sm-ctx-menu", x: ctxMenu.x, y: ctxMenu.y, items: buildCtxItems(ctxMenu.session), onClose: closeCtxMenu }) : null;
+      const ctxMenuNode = ctxMenu ? h(SessionContextMenu, { key: "sm-ctx-menu", x: ctxMenu.x, y: ctxMenu.y, items: buildCtxItems(ctxMenu.session, { x: ctxMenu.x, y: ctxMenu.y }), onClose: closeCtxMenu }) : null;
       const onPanelClose = () => {
         if (busyId !== null || wsBulkBusy) return;
         setConfirmFor(null);
@@ -6384,7 +6442,8 @@ function isTopmostDialog(z) {
         bulkTagDraft,
         bulkPresetDraft,
         wsBulkBusy,
-        onPanelClose
+        onPanelClose,
+        isNativeMenuOpen: props.isNativeMenuOpen
       };
       useEffect(() => {
         if (!open) return;
@@ -6397,6 +6456,9 @@ function isTopmostDialog(z) {
           if (s.confirmFor || s.moveFor || s.migrateFor || s.annotationFor || s.bulkPreview || s.bulkProgress || s.bulkResult || s.bulkTagDraft || s.bulkPresetDraft) return;
           if (typeof updateStore !== "undefined" && updateStore && typeof updateStore.getSnapshot === "function" && updateStore.getSnapshot()?.dialogOpen) return;
           if (activeDialogZStack && activeDialogZStack.length > 0) return;
+          // DSH's own menu (opened from "More actions…" / a right-click) handles Esc itself;
+          // closing the whole panel underneath it would be one Esc too many.
+          if (typeof s.isNativeMenuOpen === "function" && s.isNativeMenuOpen()) return;
           e.preventDefault();
           e.stopPropagation();
           s.onPanelClose();
@@ -6425,7 +6487,9 @@ function isTopmostDialog(z) {
           // the filters are cleared) is already detached when this window-level listener runs,
           // so `contains`/`closest` on e.target miss it and the whole page used to close.
           // The event path is captured at dispatch time and still lists the original ancestors.
-          const insideSelector = ".sm-nativeDialog, .sm-panelDialog, .sm-bulkDialog, .sm-annotationDialog, .sm-annotationSurface, .sm-tooltip, .sm-footerBtn, .sm-ocCtxMenu, [data-windows-menu]";
+          // `[role="menu"], [data-context-menu]` is DSH's own context menu (opened from this panel's
+          // rows): picking one of its items must not count as a click outside the panel.
+          const insideSelector = ".sm-nativeDialog, .sm-panelDialog, .sm-bulkDialog, .sm-annotationDialog, .sm-annotationSurface, .sm-tooltip, .sm-footerBtn, .sm-ocCtxMenu, [data-windows-menu], [role=\"menu\"], [data-context-menu]";
           const path = typeof e.composedPath === "function" ? e.composedPath() : [];
           if (path.length > 0) {
             if (panelRef.current && path.includes(panelRef.current)) return;
@@ -6442,6 +6506,15 @@ function isTopmostDialog(z) {
           window.removeEventListener("keydown", handler);
           window.removeEventListener("click", clickHandler);
         };
+      }, [open]);
+      // 面板打开期间给 <html> 打标，让 DSH 原生右键菜单（[data-context-menu]）浮在面板之上：
+      // 面板的 overlay 层级是 1050，原生菜单默认可能比它低而被盖住。只在面板打开时生效，
+      // 关闭后宿主菜单与宿主对话框的层级关系恢复原样。
+      useEffect(() => {
+        if (!open) return;
+        const root = document.documentElement;
+        try { root.setAttribute("data-sm-panel-open", ""); } catch (_) {}
+        return () => { try { root.removeAttribute?.("data-sm-panel-open"); } catch (_) {} };
       }, [open]);
       // 打开面板时把焦点放到当前页签的搜索框：直接开始打字就能筛选。
       // 面板从 shell.overlay / 侧栏按钮打开，焦点原本停在那个按钮上；
@@ -6720,10 +6793,24 @@ function isTopmostDialog(z) {
                 h("div", { className: "sm-ocProjects" },
                   workspaces
                     .filter(workspace => !workspaceArchiveStore.isArchived(workspace.id) || workspaceFilter === workspaceValue(workspace.id))
-                    .map(workspace => renderProjectItem(workspaceValue(workspace.id), workspace.title || workspace.name || workspace.id, workspace.path)),
+                    .map(workspace => renderProjectItem(workspaceValue(workspace.id), workspace.title || workspace.name || workspace.id, workspace.path, workspace)),
                   hasUngroupedRows ? renderProjectItem("ungrouped", t("panel.workspace.ungrouped")) : null
                 ),
                 h("div", { className: "sm-ocSideFoot" },
+                  // DSH's global panels (the sidebar's Plugins / Scheduled tasks / ... buttons), one flat list.
+                  onOpenGlobalPanel && globalPanels.length > 0 ? h("div", { className: "sm-ocPanels", role: "group", "aria-label": t("oc.panels") },
+                    globalPanels.map(entry => h("button", {
+                      key: entry.id,
+                      type: "button",
+                      className: "sm-ocFootBtn sm-ocPanelItem",
+                      "data-panel-id": entry.id,
+                      title: entry.label,
+                      onClick: () => onOpenGlobalPanel(entry.id)
+                    },
+                      h("span", { className: "sm-ocPanelGlyph", "aria-hidden": "true" }, h(GlobalPanelGlyph, { icon: entry.icon, label: entry.label })),
+                      h("span", { className: "sm-ocProjectName" }, entry.label)
+                    ))
+                  ) : null,
                   h("button", {
                     type: "button", className: "sm-ocFootBtn",
                     onClick: () => setPanelTab("settings")
@@ -6737,7 +6824,15 @@ function isTopmostDialog(z) {
               h("div", { className: "sm-ocMainHead" },
                 h("button", {
                   type: "button", className: "sm-ocNew", disabled: typeof onNewSession !== "function",
-                  onClick: () => onNewSession && onNewSession(workspaceFilter.startsWith("workspace:") ? workspaceFilter.slice("workspace:".length) : undefined)
+                  onClick: () => {
+                    if (!onNewSession) return;
+                    // A selected project => create inside it; otherwise let DSH choose (the workspace of the
+                    // last opened session, the same rule as the tab bar's "+"). The path rides along so the
+                    // handler can resolve DSH's own workspace id when it differs from this API's `id`.
+                    const selectedId = workspaceFilter.startsWith("workspace:") ? workspaceFilter.slice("workspace:".length) : undefined;
+                    const selected = selectedId === undefined ? undefined : workspaces.find(workspace => workspace.id === selectedId);
+                    onNewSession(selectedId, selected ? selected.path : undefined);
+                  }
                 },
                   h("svg", { viewBox: "0 0 16 16", width: 14, height: 14, fill: "none", stroke: "currentColor", strokeWidth: 1.2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" },
                     h("path", { d: "M7 3H3.8C3.4 3 3 3.4 3 3.8v8.4c0 .4.4.8.8.8h8.4c.4 0 .8-.4.8-.8V9" }),
@@ -7521,7 +7616,19 @@ function isTopmostDialog(z) {
           onRemove: this.props.props?.onRemove,
           onMove: this.props.props?.onMove,
           onMigrate: this.props.props?.onMigrate,
-          onNewSession: (workspaceId) => { try { this.props.panelStore.set(false); this.props.props?.onNewSession?.(workspaceId); } catch (_) {} },
+          onNewSession: (workspaceId, workspacePath) => { try { this.props.panelStore.set(false); this.props.props?.onNewSession?.(workspaceId, workspacePath); } catch (_) {} },
+          panelEntries: this.props.props?.panelEntries,
+          // Open DSH's panel first, then leave this page so it does not cover it. A host without
+          // the layout service reports false and the page stays put.
+          onOpenGlobalPanel: (id) => {
+            try {
+              const opened = this.props.props?.onOpenGlobalPanel?.(id);
+              if (opened !== false) this.props.panelStore.set(false);
+            } catch (_) {}
+          },
+          canNativeMenu: this.props.props?.canNativeMenu,
+          isNativeMenuOpen: this.props.props?.isNativeMenuOpen,
+          onNativeMenu: this.props.props?.onNativeMenu,
           onAddProject: this.props.props?.onAddProject
         });
       }
@@ -8122,6 +8229,99 @@ function isTopmostDialog(z) {
         return getCurrentSessionId() === id;
       };
 
+      // DSH services this plugin does not declare in `inject` (layout, contextMenus). Reading
+      // `ctx.<name>` for such a service THROWS on a real Cordis context
+      // (`cannot get property "<name>" without inject`), which is how "New session" silently
+      // did nothing; `ctx.get(name)` is the non-throwing read and yields undefined when absent.
+      const optionalService = (name) => {
+        try { return typeof ctx.get === "function" ? ctx.get(name) : undefined; } catch (_) { return undefined; }
+      };
+
+      // This plugin's /workspaces API calls a workspace `id`; DSH's client model calls it
+      // `workspaceId`. They normally agree, but `startSession` needs the client's, so match by
+      // id first and fall back to the directory. null = DSH has the model loaded and the
+      // project is not in it; the id is passed through untouched while the model is still empty.
+      // DSH's own context-menu service (0.2.2+). The sidebar opens its session and workspace
+      // menus through it, so opening the same targets here gives the identical menu, including
+      // every row other plugins contribute (e.g. dsh-sidebar-row-menu). null on older hosts.
+      const nativeContextMenus = () => {
+        const menus = optionalService("contextMenus");
+        return menus && typeof menus.open === "function" ? menus : null;
+      };
+
+      // The sidebar's global panels (Plugins, Scheduled tasks, Context insights, IM, ...): every
+      // plugin registers one entry in `sidebar.panellist`. The sidebar draws the pinned ones as
+      // buttons and folds the rest into "More"; here they are one flat list. Entries are read from
+      // the same slot the sidebar reads, so panels installed later appear without a reload.
+      const globalPanelsStore = (() => {
+        let snapshot = EMPTY_GLOBAL_PANELS;
+        const listeners = new Set();
+        const labelOf = (label, id) => {
+          try {
+            const value = typeof label === "function" ? label() : label;
+            if (typeof value === "string" && value.trim() !== "") return value;
+          } catch (_) { /* a label that throws falls back to the id */ }
+          return id;
+        };
+        const read = () => {
+          let entries = [];
+          try {
+            const slots = ctx.slots;
+            if (slots && typeof slots.entriesOfSlot === "function") entries = slots.entriesOfSlot("sidebar.panellist") || [];
+          } catch (_) { entries = []; }
+          const next = [];
+          for (const entry of Array.isArray(entries) ? entries : []) {
+            const options = entry && entry.options;
+            const id = options && options.id;
+            if (typeof id !== "string" || id === "") continue;
+            const component = entry.component;
+            next.push({
+              id,
+              order: typeof options.order === "number" ? options.order : 0,
+              label: labelOf(options.label, id),
+              // The sidebar renders this component as the panel's glyph ({ size, active }).
+              icon: typeof component === "function" || (component && typeof component === "object") ? component : null
+            });
+          }
+          next.sort((a, b) => a.order - b.order);
+          const same = next.length === snapshot.length && next.every((item, index) => {
+            const prev = snapshot[index];
+            return prev.id === item.id && prev.order === item.order && prev.label === item.label && prev.icon === item.icon;
+          });
+          if (same) return;
+          snapshot = Object.freeze(next);
+          for (const listener of [...listeners]) listener();
+        };
+        read();
+        return {
+          read,
+          getSnapshot: () => snapshot,
+          subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }
+        };
+      })();
+      ctx.effect(() => {
+        const offs = [];
+        try { if (ctx.slots && typeof ctx.slots.subscribe === "function") offs.push(ctx.slots.subscribe("sidebar.panellist", globalPanelsStore.read)); } catch (_) {}
+        try { if (ctx.locale && typeof ctx.locale.subscribe === "function") offs.push(ctx.locale.subscribe(globalPanelsStore.read)); } catch (_) {}
+        globalPanelsStore.read();
+        return () => { for (const off of offs) { try { if (typeof off === "function") off(); } catch (_) {} } };
+      }, "session-manager: global panel entries");
+
+      const resolveClientWorkspaceId = (workspaceId, workspacePath) => {
+        let items = [];
+        try { items = ctx.workspaces?.list?.getSnapshot?.()?.items ?? []; } catch (_) { items = []; }
+        if (!Array.isArray(items) || items.length === 0) return workspaceId;
+        const idOf = (item) => (typeof item?.workspaceId === "string" && item.workspaceId ? item.workspaceId : item?.id);
+        const byId = items.find(item => idOf(item) === workspaceId);
+        if (byId) return idOf(byId);
+        const wanted = pathKey(workspacePath);
+        if (wanted !== "") {
+          const byPath = items.find(item => pathKey(item?.path) === wanted);
+          if (byPath) return idOf(byPath);
+        }
+        return null;
+      };
+
       const clearCurrentSession = () => {
         const uiWorkspace = ctx.uiWorkspace;
         if (uiWorkspace && typeof uiWorkspace.clearMain === "function") {
@@ -8243,15 +8443,69 @@ function isTopmostDialog(z) {
           }, 250);
         },
         onOpenPanel: () => panelStore.toggle(),
+        // Global panels (Plugins, Scheduled tasks, ...) listed in the project column. Opening one
+        // leaves this page for DSH's own panel, so the caller closes the page afterwards.
+        panelEntries: globalPanelsStore,
+        onOpenGlobalPanel: (id) => {
+          const layout = optionalService("layout");
+          if (!layout || typeof layout.selectPanel !== "function") return false;
+          try { layout.selectPanel(id); return true; } catch (error) {
+            console.error("session-manager: opening panel " + id + " failed", error);
+            return false;
+          }
+        },
+        // DSH's native session / workspace menu, opened at a point inside the panel. The
+        // panel keeps its own session menu and adds "More actions…" that lands here; the
+        // project column and workspace rows (no menu of their own) use it directly.
+        canNativeMenu: () => nativeContextMenus() !== null,
+        isNativeMenuOpen: () => {
+          try {
+            const menus = nativeContextMenus();
+            return Boolean(menus && menus.active && typeof menus.active.getSnapshot === "function" && menus.active.getSnapshot());
+          } catch (_) { return false; }
+        },
+        onNativeMenu: (kind, info, point) => {
+          const menus = nativeContextMenus();
+          if (!menus || !info || !point) return false;
+          try {
+            let target;
+            if (kind === "session") {
+              if (typeof info.sessionId !== "string" || !info.sessionId) return false;
+              target = { kind: "session", value: { sessionId: info.sessionId, displayTitle: info.displayTitle || info.sessionId } };
+            } else if (kind === "workspace") {
+              // The menu's actions address DSH's own workspace id, not this plugin's API id.
+              const workspaceId = resolveClientWorkspaceId(info.workspaceId, info.path);
+              if (!workspaceId) return false;
+              target = { kind: "workspace", value: { workspaceId, path: info.path || "", displayTitle: info.displayTitle || workspaceId } };
+            } else {
+              return false;
+            }
+            menus.open(target, { x: point.x, y: point.y });
+            return true;
+          } catch (error) {
+            console.error("session-manager: opening the DSH menu failed", error);
+            return false;
+          }
+        },
         // Session-manager home page: "New session" (optionally inside a project)
         // and "Add project" (pick a directory and register it as a workspace).
-        onNewSession: (workspaceId) => {
-          const uiWorkspace = ctx.uiWorkspace;
+        // `workspaceId` is the panel's project (this plugin's API id) or undefined; `workspacePath`
+        // is that project's directory. Undefined => DSH picks the workspace of the last opened
+        // session, exactly like the tab bar's "+".
+        onNewSession: (workspaceId, workspacePath) => {
           try {
-            if (typeof ctx.layout?.selectPanel === "function") { try { ctx.layout.selectPanel(null); } catch (_) {} }
-            if (uiWorkspace && typeof uiWorkspace.startSession === "function") {
-              if (typeof workspaceId === "string" && workspaceId) uiWorkspace.startSession(workspaceId);
-              else uiWorkspace.startSession();
+            const uiWorkspace = ctx.uiWorkspace;
+            if (!uiWorkspace || typeof uiWorkspace.startSession !== "function") return;
+            // Leave any global panel (plugins, tasks...) so the new session is what shows.
+            const layout = optionalService("layout");
+            if (layout && typeof layout.selectPanel === "function") { try { layout.selectPanel(null); } catch (_) {} }
+            if (typeof workspaceId === "string" && workspaceId) {
+              const target = resolveClientWorkspaceId(workspaceId, workspacePath);
+              // An unknown project must not silently become "wherever the last session was".
+              if (target === null) throw new Error("workspace " + workspaceId + " is not known to DSH");
+              uiWorkspace.startSession(target);
+            } else {
+              uiWorkspace.startSession();
             }
           } catch (error) {
             console.error("session-manager: new session failed", error);

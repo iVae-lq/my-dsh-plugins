@@ -28,7 +28,7 @@ const clipboardStub = { writes: [], writeText(text) { this.writes.push(text); re
 /** Real, unmodified client bundle and registered slots, with a small hook host
  * to keep CI dependency-free. Tests exercise rendered controls, shared-store
  * subscriptions, async responses and the actual annotation editor. */
-export function mountClient({ sessions = [], current = "", archivedIds = [], workspaces = [], language = "zh", sessionCreatedAt = {}, fetchWorkspaces, sessionAnnotations = {}, fetchAnnotations, saveAnnotations, fetchUpdateCheck, fetchUpdateInstall, fetchUpdateStatus, fetchNpmLatest, fetchPresetScan, fetchPresets, migratePreset, fetchDeletePreview, shortcuts, confirm = () => true, wide = true, initialStorage = {}, innerWidth = 1200, innerHeight = 768, querySelector: customQuerySelector } = {}) {
+export function mountClient({ sessions = [], current = "", archivedIds = [], workspaces = [], language = "zh", sessionCreatedAt = {}, fetchWorkspaces, sessionAnnotations = {}, fetchAnnotations, saveAnnotations, fetchUpdateCheck, fetchUpdateInstall, fetchUpdateStatus, fetchNpmLatest, fetchPresetScan, fetchPresets, migratePreset, fetchDeletePreview, shortcuts, confirm = () => true, wide = true, initialStorage = {}, innerWidth = 1200, innerHeight = 768, querySelector: customQuerySelector, services = {}, clientWorkspaces, sidebarPanels: initialSidebarPanels = [] } = {}) {
   // Fresh clipboard stub per mount so each test sees only its own writes.
   clipboardStub.writes.length = 0;
   let list = { ids: sessions.map(s => s.id), byId: Object.fromEntries(sessions.map(s => [s.id, s])), current };
@@ -381,12 +381,31 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
     },
   }, { filename: "lib/client.js" });
   const registered = new Map(); let dictionaries;
+  // Services the plugin does NOT list in `inject` (DSH's `layout`, `contextMenus`):
+  // on a real Cordis context, reading `ctx.<name>` for such a service throws
+  // `cannot get property "<name>" without inject`; only `ctx.get(name)` reaches it.
+  // The harness reproduces that, so code reading them directly fails here the way it
+  // does in DSH instead of passing against a permissive stub.
+  let sidebarPanels = initialSidebarPanels;
+  const panelListeners = new Set();
+  const selectPanelCalls = [];
+  const startSessionCalls = [];
+  const layoutStub = { selectPanel(id) { selectPanelCalls.push(id); } };
+  const serviceMap = { shortcuts, layout: layoutStub, ...services };
   const ctx = {
-    // Optional DSH shortcut service stub, adopted through ctx.get("shortcuts").
-    ...(shortcuts ? { get: name => (name === "shortcuts" ? shortcuts : undefined) } : {}),
+    // Non-injected DSH services, reachable through ctx.get(name) only.
+    get: name => serviceMap[name],
     effect(fn) { const cleanup = fn(); if (typeof cleanup === "function") pluginCleanup.push(cleanup); },
     locale: { register(_name, values) { dictionaries = values; } },
     slots: {
+      // DSH's `sidebar.panellist` entries ({ options: { id, order, label }, component }), as the
+      // slot service lists them; tests swap them with api.setSidebarPanels().
+      entriesOfSlot(name) { return name === "sidebar.panellist" ? sidebarPanels : []; },
+      subscribe(name, fn) {
+        if (name !== "sidebar.panellist") return () => {};
+        panelListeners.add(fn);
+        return () => panelListeners.delete(fn);
+      },
       inject(_slot, fn) { fn(); },
       register(options, component) {
         const entry = { options, component };
@@ -404,7 +423,7 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
     uiWorkspace: {
       openSession(id) { sessionOpenCalls.push(id); },
       clearMain() { clearMainCalls.push("clearMain"); list = { ...list, current: "" }; ctx.uiWorkspace.mainReference = undefined; },
-      startSession() { clearMainCalls.push("startSession"); list = { ...list, current: "" }; ctx.uiWorkspace.mainReference = undefined; },
+      startSession(...args) { clearMainCalls.push("startSession"); startSessionCalls.push(args); list = { ...list, current: "" }; ctx.uiWorkspace.mainReference = undefined; },
       archiveSession: async (id) => { clearMainCalls.push("archiveSession:" + id); list = { ...list, current: "" }; ctx.uiWorkspace.mainReference = undefined; },
       unarchiveSession: async (id) => { clearMainCalls.push("unarchiveSession:" + id); },
       mainReference: current ? { sessionId: current } : undefined,
@@ -414,7 +433,9 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
       unarchiveSession: async (id) => { clearMainCalls.push("unarchiveSession:" + id); },
       refresh: async () => { refreshCalls.push("workspaces"); },
       list: {
-        items: workspaceData,
+        // The host API (/workspaces) and DSH's client model name a workspace differently
+        // (`id` vs `workspaceId`); `clientWorkspaces` lets a test give the client model its own shape.
+        items: clientWorkspaces ?? workspaceData,
         archivedSessionIds: archivedIds,
         _snapshot: null,
         getSnapshot() {
@@ -431,6 +452,12 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
       }
     },
   };
+  for (const name of ["layout", "contextMenus"]) {
+    Object.defineProperty(ctx, name, {
+      configurable: true,
+      get() { throw new Error(`cannot get property "${name}" without inject`); }
+    });
+  }
   exports.apply(ctx);
   const t = (key, values = {}) => (dictionaries[language][key] ?? key).replace(/\{(\w+)\}/g, (_, name) => String(values[name] ?? ""));
   const common = { t, useSessions: selector => selector(list), useWorkspaces: selector => selector(workspaceSnapshot) };
@@ -504,6 +531,12 @@ export function mountClient({ sessions = [], current = "", archivedIds = [], wor
     mountComponent(component, props) { return host(component, props); },
     /** Close the panel and open it again (the component unmounts on close). */
     remountPanel,
+    /** Replace the sidebar's global-panel entries and notify subscribers, like a plugin loading late. */
+    setSidebarPanels(next) { sidebarPanels = next; for (const fn of [...panelListeners]) fn(); panelHost.dirty = true; },
+    /** Ids passed to layout.selectPanel(), in order (null = back to the conversation). */
+    get selectPanelCalls() { return selectPanelCalls; },
+    /** Arguments of every uiWorkspace.startSession() call, in order. */
+    get startSessionCalls() { return startSessionCalls; },
     /** aria-labels of every element that received .focus(), in order. */
     get focusedLabels() { return [...focusedLabels]; },
     get requests() { return requests; }, get workspaceRequests() { return requests.filter(r => r.url.endsWith("/workspaces")); },
