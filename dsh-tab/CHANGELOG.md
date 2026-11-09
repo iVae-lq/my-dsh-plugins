@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- 子智能体 / 智能体团队成员的会话不再单开标签：官方会话目录里它们是 `origin: "subagent"` 的行，现在归到所属主会话的标签（沿 `parentId` / `subagentCatalog` 一路找到最上层的主会话）。在标签里点开子智能体，标签栏不新增、该标签保持选中；点已选中的主会话标签不会跳走。
+- 每个标签记住自己最后停在的子智能体 / 团队成员（仅本次运行，不落盘）：切到别的标签再切回来，回到那个子会话（用官方绑定里的子会话地址，带 mode）；在会话里点「回到主会话」后则下次回主会话；子会话被删掉时回主会话。
+- 关闭主会话标签时，如果正看着它的子智能体，按平时的规则落到相邻标签；旧版本给子智能体单开过的标签在升级后自动清掉。
+- 新增客户端测试：`test/helpers/client-harness.mjs` 用极简 hook 宿主跑真实的 `client.js`，`test/client-subagent-tabs.test.mjs` 覆盖上面的行为。
+
 ## 0.2.1 — 2026-11-05
 
 - 修复 README 截图在 `raw.githubusercontent.com` 不可达的网络下无法显示：图片改用 jsDelivr CDN，并按 `v0.2.0` tag 固定，GitHub 与 npm 页面都能加载。

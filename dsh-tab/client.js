@@ -509,6 +509,42 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
       return undefined
     }
 
+    // ── 子智能体 / 团队成员会话 ─────────────────────────────────────────────
+    // 它们在官方会话目录里 origin 为 "subagent"，parentId 是直接父会话（嵌套的指向上一层；
+    // 团队成员的父会话就是 lead）。官方侧栏本来就不把它们列成独立会话，所以标签栏也不该给
+    // 它们单开标签：在哪个主会话的标签里点开，就留在那个标签里。
+    const isSubagentRow = (row) => row !== undefined && row !== null && row.origin === 'subagent'
+    /** 能当标签的会话行（存在、且不是子智能体 / 团队成员）。 */
+    const isTabRow = (row) => row !== undefined && row !== null && !isSubagentRow(row)
+
+    /** 子智能体的直接父会话 id：先看会话行自带的 parentId，再退到各父会话的 subagentCatalog。 */
+    function parentSessionIdOf(catalog, id) {
+      const row = catalog?.byId?.[id]
+      if (typeof row?.parentId === 'string' && row.parentId.length > 0) return row.parentId
+      for (const [parentId, snapshot] of Object.entries(catalog?.projectionsBySession ?? {})) {
+        const entries = snapshot?.values?.subagentCatalog
+        if (Array.isArray(entries) && entries.some((entry) => entry?.id === id)) return parentId
+      }
+      return undefined
+    }
+
+    /**
+     * 一个会话落在哪个标签上：普通会话就是它自己；子智能体 / 团队成员一路往上找到最上层的主会话。
+     * 找不到父会话（目录还没同步全）时返回 undefined —— 宁可暂时不亮任何标签，也不给它单开一个。
+     */
+    function tabSessionIdOf(catalog, id) {
+      if (id === undefined || catalog === undefined || catalog === null) return id
+      const rows = catalog.byId ?? {}
+      let current = id
+      for (let depth = 0; depth < 32; depth += 1) {
+        if (!isSubagentRow(rows[current])) return current
+        const parent = parentSessionIdOf(catalog, current)
+        if (parent === undefined || parent === current) return undefined
+        current = parent
+      }
+      return undefined
+    }
+
     function sessionStatusSignal(status) {
       if (status === undefined || status === null) return undefined
       if (status.pendingInteraction !== undefined && status.pendingInteraction !== null) return 'pending'
@@ -742,7 +778,15 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
 
         const rows = catalog?.byId ?? {}
         const archived = useMemo(() => new Set(workspaces?.archivedSessionIds ?? []), [workspaces])
-        const activeSessionId = currentSessionIdOf(catalog)
+        // 主视图里真正打开的会话（可能是子智能体 / 团队成员），以及它所属的标签会话
+        const currentSessionId = currentSessionIdOf(catalog)
+        const activeSessionId = tabSessionIdOf(catalog, currentSessionId)
+
+        // 标签里点进了子智能体 / 团队成员：记下来，切走再切回这个标签时回到它，而不是回到主会话
+        useEffect(() => {
+          if (activeSessionId === undefined) return
+          actions.childView.remember(activeSessionId, currentSessionId === activeSessionId ? undefined : currentSessionId)
+        }, [activeSessionId, currentSessionId])
 
         // 非会话界面（插件、自动任务等全局面板）：打开时在标签栏里起一个面板标签，
         // 关掉它回到原会话。面板标签只活在本次运行里，不进持久化。
@@ -818,11 +862,12 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
         // 会话被删除 / 归档后摘签
         useEffect(() => {
           if (catalog?.phase !== 'ready') return
-          const stale = actions.store.getSnapshot().ids.filter((id) => rows[id] === undefined || archived.has(id))
+          // 子智能体 / 团队成员也摘掉：旧版本给它们单开过标签，升级后顺手清理
+          const stale = actions.store.getSnapshot().ids.filter((id) => !isTabRow(rows[id]) || archived.has(id))
           if (stale.length > 0) actions.store.removeMany(stale)
         }, [catalog, archived])
 
-        const tabs = displayTabs(snapshot).filter((tab) => rows[tab.id] !== undefined && !archived.has(tab.id))
+        const tabs = displayTabs(snapshot).filter((tab) => isTabRow(rows[tab.id]) && !archived.has(tab.id))
         const pinnedCount = tabs.filter((tab) => tab.pinned).length
         const visualActiveId =
           pendingSelect !== null ? pendingSelect.id : activePanelId !== null ? panelKey(activePanelId) : activeId
@@ -1460,7 +1505,42 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
           const catalog = sessions.list.getSnapshot()
           const rows = catalog?.byId ?? {}
           const archived = new Set(ctx.workspaces.list.getSnapshot().archivedSessionIds ?? [])
-          return displayTabs(store.getSnapshot()).filter((tab) => rows[tab.id] !== undefined && !archived.has(tab.id))
+          return displayTabs(store.getSnapshot()).filter((tab) => isTabRow(rows[tab.id]) && !archived.has(tab.id))
+        }
+
+        /** 当前显示的会话所属的标签会话（正在看某个子智能体时是它的主会话）。 */
+        const currentTabSessionId = (catalog) => tabSessionIdOf(catalog, currentSessionIdOf(catalog))
+
+        // 每个标签里最后看的子智能体 / 团队成员：主会话 id → { id, target }。只活在本次运行里。
+        // target 优先用官方绑定里的子会话地址（带 mode），取不到就用子会话 id，官方会自己解析。
+        const childViews = new Map()
+        const childView = {
+          remember(rootId, childId) {
+            if (childId === undefined) {
+              childViews.delete(rootId)
+              return
+            }
+            let target = childId
+            try {
+              target = sessions.binding(childId)?.session.getSnapshot().subagent?.address ?? childId
+            } catch (error) {
+              /* 取不到地址：用子会话 id */
+            }
+            childViews.set(rootId, { id: childId, target })
+          },
+          /** 标签被切回来时该打开的子会话目标；子会话没了 / 不再属于这个标签就忘掉。 */
+          restoreTarget(rootId, catalog) {
+            const remembered = childViews.get(rootId)
+            if (remembered === undefined) return undefined
+            if (!isSubagentRow(catalog?.byId?.[remembered.id]) || tabSessionIdOf(catalog, remembered.id) !== rootId) {
+              childViews.delete(rootId)
+              return undefined
+            }
+            return remembered.target
+          },
+          forget(ids) {
+            for (const id of ids) childViews.delete(id)
+          },
         }
 
         // 关掉当前标签后 official 「新建会话」会复用空白会话，导航完成时当前会话可能不变，
@@ -1478,7 +1558,7 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
             const timer = setTimeout(() => {
               ensureTimers.delete(timer)
               try {
-                const current = currentSessionIdOf(sessions.list.getSnapshot())
+                const current = currentTabSessionId(sessions.list.getSnapshot())
                 if (current === undefined) return
                 // 导航还没完成时当前会话仍是刚被关掉的旧会话：不要把它加回来
                 if (current === closedCurrent) return
@@ -1496,8 +1576,9 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
         const closeIds = (idsToClose, nextId) => {
           if (idsToClose.length === 0) return
           const catalog = sessions.list.getSnapshot()
-          const current = currentSessionIdOf(catalog)
+          const current = currentTabSessionId(catalog)
           const currentRow = current === undefined ? undefined : catalog?.byId?.[current]
+          childView.forget(idsToClose)
           const allTabs = displayTabs(store.getSnapshot())
           const closingAll = allTabs.every((tab) => idsToClose.includes(tab.id))
           // 全关但当前就是一个空白「新会话」：官方「新建会话」只会把同一个空白会话再打开，
@@ -1556,6 +1637,7 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
 
         const actions = {
           store,
+          childView,
           panel: panelApi,
           /** 当前会话是不是刚由点标签切过来的（读一次即清除）。 */
           consumeTabNavigation(id) {
@@ -1568,10 +1650,12 @@ html[data-windows-titlebar] .dsh-tab-pagebar__tab[aria-selected=true]{height:cal
             try {
               // 面板盖在会话上时，点会话标签先回到会话界面（不改变当前会话）
               if (panelApi.getActive() !== null) layout.selectPanel(null)
-              const current = currentSessionIdOf(sessions.list.getSnapshot())
-              if (current === id) return
+              const catalog = sessions.list.getSnapshot()
+              // 正在看这个标签里的子智能体 / 团队成员时，这个标签就已经是当前标签
+              if (currentTabSessionId(catalog) === id) return
               tabNavigation = { id, at: Date.now() }
-              uiWorkspace.openSession(id)
+              // 这个标签上次停在某个子智能体 / 团队成员里：回到那里，像浏览器标签记住自己的页面
+              uiWorkspace.openSession(childView.restoreTarget(id, catalog) ?? id)
             } catch (error) {
               console.error('dsh-tab: switching conversation failed', error)
             }
