@@ -35,7 +35,6 @@ const MAX_BODY_BYTES = 64 * 1024
 const MAX_KEY_LENGTH = 300
 const MAX_EFFORT_LENGTH = 64
 const MAX_EFFORTS = 500
-const MAX_RECENT = 8
 const MAX_FAVORITES = 100
 const MAX_NAME_LENGTH = 200
 const MAX_MODALITIES = 8
@@ -107,7 +106,7 @@ function mergeEfforts(base, raw) {
   return efforts
 }
 
-/** Unique valid keys in first-seen order, at most `max` (lists are most-recent first). */
+/** Unique valid keys in first-seen order, at most `max`. */
 function normalizeKeys(raw, max) {
   const keys = []
   if (!Array.isArray(raw)) return keys
@@ -131,21 +130,23 @@ function mergePrefs(base, raw) {
   return prefs
 }
 
-/** Any input -> a fresh, valid State. Bad parts are dropped; this never throws. */
+/**
+ * Any input -> a fresh, valid State. Bad parts are dropped; this never throws. Fields it does not
+ * know (an older file's `recent` list, for one) are dropped too and vanish on the next write.
+ */
 export function normalizeState(raw) {
   const src = isRecord(raw) ? raw : {}
   return {
     version: STATE_VERSION,
     efforts: mergeEfforts({}, src.efforts),
-    recent: normalizeKeys(src.recent, MAX_RECENT),
     favorites: normalizeKeys(src.favorites, MAX_FAVORITES),
     prefs: mergePrefs({ picker: true, memory: true }, src.prefs)
   }
 }
 
 /**
- * Apply a Patch to a State without mutating either. `efforts` merge per key, `recent` and
- * `favorites` are replaced whenever the patch carries an array, `prefs` merge per boolean.
+ * Apply a Patch to a State without mutating either. `efforts` merge per key, `favorites` is
+ * replaced whenever the patch carries an array, `prefs` merge per boolean.
  */
 export function mergePatch(state, patch) {
   const base = normalizeState(state)
@@ -153,7 +154,6 @@ export function mergePatch(state, patch) {
   return {
     version: STATE_VERSION,
     efforts: mergeEfforts(base.efforts, patch.efforts),
-    recent: Array.isArray(patch.recent) ? normalizeKeys(patch.recent, MAX_RECENT) : base.recent,
     favorites: Array.isArray(patch.favorites) ? normalizeKeys(patch.favorites, MAX_FAVORITES) : base.favorites,
     prefs: mergePrefs(base.prefs, patch.prefs)
   }

@@ -19,7 +19,7 @@ const { mkdtemp, readFile, readdir, rm, writeFile } = realFs
 
 const STATE_URL = `${ROUTE}/state`
 const INFO_URL = `${ROUTE}/info`
-const DEFAULT_STATE = { version: 1, efforts: {}, recent: [], favorites: [], prefs: { picker: true, memory: true } }
+const DEFAULT_STATE = { version: 1, efforts: {}, favorites: [], prefs: { picker: true, memory: true } }
 const UNAVAILABLE = { ok: false, error: 'unavailable' }
 
 /** What the llm service returns for a model (shape of dsh-llm's normalizeModelInfo): far more than we expose. */
@@ -91,7 +91,7 @@ const validKey = (key) => {
 
 /** An independent statement of the State invariants, so the implementation is not checked against itself. */
 function assertValidState(state) {
-  assert.deepEqual(Object.keys(state).sort(), ['efforts', 'favorites', 'prefs', 'recent', 'version'])
+  assert.deepEqual(Object.keys(state).sort(), ['efforts', 'favorites', 'prefs', 'version'])
   assert.equal(state.version, 1)
   const entries = Object.entries(state.efforts)
   assert.ok(entries.length <= 500, 'efforts cap')
@@ -99,11 +99,9 @@ function assertValidState(state) {
     assert.ok(validKey(key), `valid effort key: ${key}`)
     assert.ok(value === null || (typeof value === 'string' && value.length > 0 && value.length <= 64), `valid effort for ${key}`)
   }
-  for (const [list, max] of [[state.recent, 8], [state.favorites, 100]]) {
-    assert.ok(Array.isArray(list) && list.length <= max, 'list cap')
-    assert.equal(new Set(list).size, list.length, 'list is unique')
-    assert.ok(list.every(validKey), 'list keys are valid')
-  }
+  assert.ok(Array.isArray(state.favorites) && state.favorites.length <= 100, 'favorites cap')
+  assert.equal(new Set(state.favorites).size, state.favorites.length, 'favorites are unique')
+  assert.ok(state.favorites.every(validKey), 'favorite keys are valid')
   assert.deepEqual(Object.keys(state.prefs).sort(), ['memory', 'picker'])
   assert.equal(typeof state.prefs.picker, 'boolean')
   assert.equal(typeof state.prefs.memory, 'boolean')
@@ -204,8 +202,17 @@ test('normalizeState: garbage in, default state out', () => {
   const garbage = [undefined, null, 0, 42, 10n, '', 'text', true, false, [], [1, 2], () => {}, Symbol('s')]
   for (const value of garbage) assert.deepEqual(normalizeState(value), DEFAULT_STATE, typeof value)
   assert.deepEqual(normalizeState({}), DEFAULT_STATE)
-  assert.deepEqual(normalizeState({ efforts: 5, recent: 'x', favorites: {}, prefs: [], version: 'z' }), DEFAULT_STATE)
+  assert.deepEqual(normalizeState({ efforts: 5, favorites: {}, prefs: [], version: 'z' }), DEFAULT_STATE)
   assert.equal(normalizeState({ version: 99 }).version, 1, 'the version is ours to stamp')
+})
+
+test('normalizeState: the `recent` list of an older version is dropped, valid or not', () => {
+  const legacy = { efforts: { 'a/b': 'high' }, favorites: ['a/b'], recent: ['a/b', 'c/d'] }
+  const state = normalizeState(legacy)
+  assert.deepEqual(state, { version: 1, efforts: { 'a/b': 'high' }, favorites: ['a/b'], prefs: { picker: true, memory: true } })
+  assert.equal(Object.hasOwn(state, 'recent'), false)
+  assert.equal(Object.hasOwn(mergePatch(state, { recent: ['x/y'] }), 'recent'), false, 'a patch from a stale page cannot bring it back')
+  assert.deepEqual(normalizeState({ recent: 'x' }), DEFAULT_STATE)
 })
 
 test('normalizeState: effort keys are provider/model, split at the first slash', () => {
@@ -218,9 +225,8 @@ test('normalizeState: effort keys are provider/model, split at the first slash',
   assert.deepEqual(Object.keys(result), valid, 'model ids may contain slashes; both halves must be non-empty')
   assert.ok(Object.values(result).every((value) => value === 'high'))
 
-  const lists = normalizeState({ recent: [5, null, undefined, {}, ['a/b'], true, 'a/b'], favorites: ['/a/b', 'a/'] })
-  assert.deepEqual(lists.recent, ['a/b'], 'non-string entries are dropped')
-  assert.deepEqual(lists.favorites, [])
+  const lists = normalizeState({ favorites: [5, null, undefined, {}, ['a/b'], true, '/a/b', 'a/', 'a/b'] })
+  assert.deepEqual(lists.favorites, ['a/b'], 'non-string and malformed entries are dropped')
 })
 
 test('normalizeState: effort values are short non-empty strings or null; keys stop at 300 chars', () => {
@@ -255,12 +261,11 @@ test('normalizeState: at most 500 efforts, counted over valid entries only', () 
   assert.equal(keptMixed[499], 'p/m499', 'dropped entries do not eat the quota')
 })
 
-test('normalizeState: recent and favorites are unique, ordered and capped', () => {
+test('normalizeState: favorites are unique, ordered and capped', () => {
   const keys = (n) => Array.from({ length: n }, (_, i) => `k/${i}`)
-  assert.deepEqual(normalizeState({ recent: ['a/1', 'b/2', 'a/1', 'bad', 7, null, 'c/3', 'b/2'] }).recent, ['a/1', 'b/2', 'c/3'])
-  assert.deepEqual(normalizeState({ recent: keys(12) }).recent, keys(8), 'the most recent 8 survive')
-  const doubled = keys(10).flatMap((key) => [key, key])
-  assert.deepEqual(normalizeState({ recent: doubled }).recent, keys(8), 'duplicates go before the cap applies')
+  assert.deepEqual(normalizeState({ favorites: ['a/1', 'b/2', 'a/1', 'bad', 7, null, 'c/3', 'b/2'] }).favorites, ['a/1', 'b/2', 'c/3'])
+  const doubled = keys(150).flatMap((key) => [key, key])
+  assert.deepEqual(normalizeState({ favorites: doubled }).favorites, keys(100), 'duplicates go before the cap applies')
   assert.deepEqual(normalizeState({ favorites: keys(150) }).favorites, keys(100))
   assert.deepEqual(normalizeState({ favorites: ['z/1', 'a/1', 'z/1', 'm/1'] }).favorites, ['z/1', 'a/1', 'm/1'], 'order kept, not sorted')
 })
@@ -276,13 +281,13 @@ test('normalizeState: prefs default to true and only accept booleans', () => {
 
 test('normalizeState: hostile keys cannot pollute prototypes', () => {
   const raw = JSON.parse(
-    '{"efforts":{"__proto__":"high","constructor":"low","__proto__/m":"high"},"recent":["__proto__","constructor"],"prefs":{"__proto__":{"picker":false}}}'
+    '{"efforts":{"__proto__":"high","constructor":"low","__proto__/m":"high"},"favorites":["__proto__","constructor"],"prefs":{"__proto__":{"picker":false}}}'
   )
   const state = normalizeState(raw)
   assert.deepEqual(Object.keys(state.efforts), ['__proto__/m'], 'a valid key always holds a slash, so it is never a prototype member')
   assert.equal(state.efforts['__proto__/m'], 'high')
   assert.equal(Object.getPrototypeOf(state.efforts), Object.prototype)
-  assert.deepEqual(state.recent, [])
+  assert.deepEqual(state.favorites, [], 'prototype member names are not keys')
   assert.equal(state.prefs.picker, true)
   assert.equal({}.picker, undefined)
   assert.equal({}.high, undefined)
@@ -290,7 +295,7 @@ test('normalizeState: hostile keys cannot pollute prototypes', () => {
 
 test('normalizeState: idempotent, fresh and non-mutating', () => {
   const messy = deepFreeze({
-    efforts: { 'a/b': 'low', bad: 'x' }, recent: ['a/b', 'a/b'], favorites: ['a/b'], prefs: { picker: false, x: 1 }, extra: true
+    efforts: { 'a/b': 'low', bad: 'x' }, favorites: ['a/b', 'a/b'], prefs: { picker: false, x: 1 }, extra: true
   })
   const first = normalizeState(messy) // a frozen input would make any write throw
   assert.deepEqual(normalizeState(first), first)
@@ -300,7 +305,7 @@ test('normalizeState: idempotent, fresh and non-mutating', () => {
   const a = normalizeState()
   const b = normalizeState()
   a.efforts['x/y'] = 'high'
-  a.recent.push('x/y')
+  a.favorites.push('x/y')
   a.prefs.picker = false
   assert.deepEqual(b, DEFAULT_STATE, 'results share no structure')
 })
@@ -309,7 +314,6 @@ test('normalizeState: idempotent, fresh and non-mutating', () => {
 
 const BASE = normalizeState({
   efforts: { 'openai/gpt-5': 'low', 'anthropic/opus': 'high' },
-  recent: ['openai/gpt-5', 'anthropic/opus'],
   favorites: ['anthropic/opus'],
   prefs: { picker: true, memory: true }
 })
@@ -317,7 +321,6 @@ const BASE = normalizeState({
 test('mergePatch: efforts merge per key and null survives', () => {
   const merged = mergePatch(BASE, { efforts: { 'openai/gpt-5': 'max', 'x/y': 'min' } })
   assert.deepEqual(merged.efforts, { 'openai/gpt-5': 'max', 'anthropic/opus': 'high', 'x/y': 'min' })
-  assert.deepEqual(merged.recent, BASE.recent)
   assert.deepEqual(merged.favorites, BASE.favorites)
   assert.deepEqual(merged.prefs, BASE.prefs)
 
@@ -331,19 +334,18 @@ test('mergePatch: efforts merge per key and null survives', () => {
   assert.deepEqual(partial.efforts, { ...BASE.efforts, 'good/one': 'low', 'good/three': 'high' }, 'bad entries are dropped, good ones applied')
 })
 
-test('mergePatch: recent and favorites are replaced, not merged', () => {
-  const replaced = mergePatch(BASE, { recent: ['z/1'] })
-  assert.deepEqual(replaced.recent, ['z/1'])
-  assert.deepEqual(replaced.favorites, BASE.favorites, 'an absent list is left alone')
+test('mergePatch: favorites are replaced, not merged', () => {
+  const replaced = mergePatch(BASE, { favorites: ['z/1'] })
+  assert.deepEqual(replaced.favorites, ['z/1'])
+  assert.deepEqual(replaced.efforts, BASE.efforts, 'an absent part is left alone')
 
   assert.deepEqual(mergePatch(BASE, { favorites: [] }).favorites, [], 'an empty list clears')
-  const ignored = mergePatch(BASE, { recent: 'nope', favorites: { 'a/b': 1 } })
-  assert.deepEqual(ignored.recent, BASE.recent, 'a non-array is no list at all')
-  assert.deepEqual(ignored.favorites, BASE.favorites)
+  const ignored = mergePatch(BASE, { favorites: { 'a/b': 1 } })
+  assert.deepEqual(ignored.favorites, BASE.favorites, 'a non-array is no list at all')
 
-  const cleaned = mergePatch(BASE, { recent: ['b/1', 'b/1', 'bad', 'c/2', ...Array.from({ length: 12 }, (_, i) => `d/${i}`)] })
-  assert.equal(cleaned.recent.length, 8)
-  assert.deepEqual(cleaned.recent.slice(0, 3), ['b/1', 'c/2', 'd/0'], 'patch lists are normalized like any other')
+  const cleaned = mergePatch(BASE, { favorites: ['b/1', 'b/1', 'bad', 'c/2', ...Array.from({ length: 120 }, (_, i) => `d/${i}`)] })
+  assert.equal(cleaned.favorites.length, 100)
+  assert.deepEqual(cleaned.favorites.slice(0, 3), ['b/1', 'c/2', 'd/0'], 'patch lists are normalized like any other')
 })
 
 test('mergePatch: prefs merge per boolean', () => {
@@ -358,11 +360,11 @@ test('mergePatch: prefs merge per boolean', () => {
 
 test('mergePatch: pure, and tolerant of a non-object patch or state', () => {
   const frozenState = deepFreeze(structuredClone(BASE))
-  const frozenPatch = deepFreeze({ efforts: { 'x/y': 'low' }, recent: ['x/y'], favorites: ['x/y'], prefs: { picker: false } })
+  const frozenPatch = deepFreeze({ efforts: { 'x/y': 'low' }, favorites: ['x/y'], prefs: { picker: false } })
   const merged = mergePatch(frozenState, frozenPatch) // any write to either input would throw
   assertValidState(merged)
   assert.notEqual(merged.efforts, frozenState.efforts)
-  assert.notEqual(merged.recent, frozenPatch.recent)
+  assert.notEqual(merged.favorites, frozenPatch.favorites)
 
   for (const patch of [undefined, null, 'x', 5, true, [], [{ efforts: { 'a/b': 'low' } }]]) {
     assert.deepEqual(mergePatch(BASE, patch), BASE, `a ${Array.isArray(patch) ? 'array' : typeof patch} patch changes nothing`)
@@ -393,7 +395,7 @@ test('normalizeState and mergePatch survive junk in every field', () => {
     undefined, null, true, false, 0, -1, 1.5, NaN, '', 'a/b', 'x'.repeat(1000), [], [null], ['a/b', 7, {}], [[]], [[['a/b']]],
     {}, { a: 1 }, { 'a/b': {} }, { 'a/b': ['x'] }, { 'a/b': 'low', 'c/d': null, bad: 1 }
   ]
-  for (const field of ['efforts', 'recent', 'favorites', 'prefs', 'version']) {
+  for (const field of ['efforts', 'recent', 'favorites', 'prefs', 'version']) { // `recent`: an older file's field, now simply ignored
     for (const value of junk) {
       const raw = { [field]: value }
       assertValidState(normalizeState(raw))
@@ -436,7 +438,6 @@ test('store: patches roundtrip through the file and survive a restart', async ()
     const store = createStateStore({ dir })
     const merged = await store.patch({
       efforts: { 'openai/gpt-5': 'high', 'openrouter/anthropic/claude-3.5-sonnet': null },
-      recent: ['openai/gpt-5'],
       favorites: ['openai/gpt-5'],
       prefs: { memory: false }
     })
@@ -455,7 +456,7 @@ test('store: patches roundtrip through the file and survive a restart', async ()
       'openai/gpt-5': 'high', 'openrouter/anthropic/claude-3.5-sonnet': null, 'anthropic/opus': 'low'
     })
     assert.deepEqual(third.prefs, { picker: false, memory: false })
-    assert.deepEqual(third.recent, ['openai/gpt-5'], 'lists the patch did not carry are untouched')
+    assert.deepEqual(third.favorites, ['openai/gpt-5'], 'lists the patch did not carry are untouched')
   })
 })
 
@@ -507,7 +508,6 @@ test('store: a file with a BOM or partly invalid content is accepted and sanitiz
     assert.deepEqual(await createStateStore({ dir: root }).read(), {
       version: 1,
       efforts: { 'a/b': 'low', 'e/f': null },
-      recent: ['a/b'],
       favorites: [],
       prefs: { picker: false, memory: true }
     })
@@ -539,10 +539,10 @@ test('store: the first load is shared and read() hands out copies', async () => 
     assert.equal((await store.read()).efforts['a/b'], 'low', 'cached: later disk edits are not re-read')
 
     first.efforts['a/b'] = 'tampered'
-    first.recent.push('x/y')
+    first.favorites.push('x/y')
     const again = await store.read()
     assert.equal(again.efforts['a/b'], 'low', 'mutating a result cannot corrupt the cache')
-    assert.deepEqual(again.recent, [])
+    assert.deepEqual(again.favorites, [])
     await store.flush()
   })
 })
@@ -889,7 +889,6 @@ test('handler: /state patches roundtrip, merge, and persist across a restart', a
       body: {
         patch: {
           efforts: { 'openai/gpt-5': 'high', 'ollama/qwen3:30b': null },
-          recent: ['openai/gpt-5', 'ollama/qwen3:30b'],
           favorites: ['openai/gpt-5'],
           prefs: { memory: false }
         }
@@ -898,7 +897,6 @@ test('handler: /state patches roundtrip, merge, and persist across a restart', a
     const afterFirst = {
       version: 1,
       efforts: { 'openai/gpt-5': 'high', 'ollama/qwen3:30b': null },
-      recent: ['openai/gpt-5', 'ollama/qwen3:30b'],
       favorites: ['openai/gpt-5'],
       prefs: { picker: true, memory: false }
     }
@@ -907,17 +905,16 @@ test('handler: /state patches roundtrip, merge, and persist across a restart', a
     assert.deepEqual((await call({ body: {} })).body, { ok: true, state: afterFirst }, 'a read sees the patch')
 
     const second = await call({
-      body: { patch: { efforts: { 'openai/gpt-5': 'low', 'x/y': 'min' }, recent: ['x/y'], prefs: { picker: false } } }
+      body: { patch: { efforts: { 'openai/gpt-5': 'low', 'x/y': 'min' }, recent: ['x/y'], prefs: { picker: false } } } // `recent`: a stale page still sending it
     })
     const afterSecond = {
       version: 1,
       efforts: { 'openai/gpt-5': 'low', 'ollama/qwen3:30b': null, 'x/y': 'min' },
-      recent: ['x/y'],
       favorites: ['openai/gpt-5'],
       prefs: { picker: false, memory: false }
     }
     assert.deepEqual(second.body, { ok: true, state: afterSecond })
-    assert.deepEqual(Object.keys(second.body.state).sort(), ['efforts', 'favorites', 'prefs', 'recent', 'version'])
+    assert.deepEqual(Object.keys(second.body.state).sort(), ['efforts', 'favorites', 'prefs', 'version'])
 
     await store.flush()
     const restarted = createHandler({ fence: () => true, store: createStateStore({ dir }) })
@@ -931,7 +928,6 @@ test('handler: bad parts of a patch are dropped, the rest applies', async () => 
       body: {
         patch: {
           efforts: { 'good/model': 'high', bad: 'x', 'too/long': 'x'.repeat(65), 'num/model': 3 },
-          recent: 'nope',
           favorites: ['fav/one', 7, 'fav/one'],
           prefs: { picker: 'yes', memory: false },
           junk: { a: 1 },
@@ -943,7 +939,6 @@ test('handler: bad parts of a patch are dropped, the rest applies', async () => 
     assert.deepEqual(res.body.state, {
       version: 1,
       efforts: { 'good/model': 'high' },
-      recent: [],
       favorites: ['fav/one'],
       prefs: { picker: true, memory: false }
     })

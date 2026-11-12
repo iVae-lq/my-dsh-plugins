@@ -4,7 +4,7 @@
  * Two things in one plugin:
  *
  * 1. An OpenCode-style model picker that takes over the composer's model seat
- *    (`conversation.input.model`): search, Favorites, Recent, models grouped by provider, and a
+ *    (`conversation.input.model`): search, Favorites, models grouped by provider, and a
  *    flyout beside the highlighted model that lists ITS reasoning efforts — so the model and its
  *    effort are chosen in one step. Click a row = that model with its remembered effort; click an
  *    effort in the flyout = that model with that effort.
@@ -44,11 +44,18 @@ window.__ModuleLoader__.load({
     const MAX_KEY = 300
     const MAX_EFFORT = 64
     const MAX_EFFORT_ENTRIES = 500
-    const MAX_RECENT = 8
-    const SHOWN_RECENT = 5
     const MAX_FAVORITES = 100
-    const MENU_WIDTH = 440
-    const FLY_WIDTH = 220
+    // Sizes follow the content, not the other way round. The widest realistic row (a long model name, its
+    // provider and the effort label) needs about 360px and a typical one about 300; the widest flyout row
+    // ("Add to favorites" + CTRL F) needs 160px. Height is capped so a full list keeps a 1 : 1.4 portrait
+    // shape (340 x 480) instead of becoming a tall slab; the flyout stays about 0.63 wide-to-tall.
+    const MENU_WIDTH = 340
+    const MENU_MAX_HEIGHT = 480
+    // Never shorter than the tallest usual flyout (default + 5 levels, favorite, footer = 290px), so a short
+    // result list (a search) cannot leave the flyout hanging out of the menu, and the menu does not jump in
+    // height while typing. It yields to a short window (see menuStyle).
+    const MENU_MIN_HEIGHT = 300
+    const FLY_WIDTH = 184
     // Pointer tracking is never delayed or smoothed: the highlight and the flyout beside it land on the
     // pointer's row in the same frame as the move (no hover-intent timer, no highlight fade, no flyout
     // glide: any of those shows up as the UI trailing the mouse). Only opening and closing animate, and
@@ -72,7 +79,6 @@ window.__ModuleLoader__.load({
       'empty.models': '暂无可用模型',
       'status.loading': '正在刷新模型列表…',
       'group.favorites': '收藏',
-      'group.recent': '最近使用',
       'provider.account': 'DeepSeek 账号',
       'effort.default': '默认',
       'effort.aria': '推理强度',
@@ -104,7 +110,6 @@ window.__ModuleLoader__.load({
       'empty.models': 'No models available.',
       'status.loading': 'Refreshing model list…',
       'group.favorites': 'Favorites',
-      'group.recent': 'Recent',
       'provider.account': 'DeepSeek Account',
       'effort.default': 'Default',
       'effort.aria': 'Reasoning effort',
@@ -164,7 +169,6 @@ window.__ModuleLoader__.load({
       return {
         version: 1,
         efforts,
-        recent: uniqueKeys(src.recent, MAX_RECENT),
         favorites: uniqueKeys(src.favorites, MAX_FAVORITES),
         prefs: { picker: prefs.picker !== false, memory: prefs.memory !== false },
       }
@@ -176,7 +180,6 @@ window.__ModuleLoader__.load({
       const next = {
         version: 1,
         efforts: { ...state.efforts },
-        recent: state.recent,
         favorites: state.favorites,
         prefs: { ...state.prefs },
       }
@@ -192,7 +195,6 @@ window.__ModuleLoader__.load({
           for (const key of keys.slice(0, keys.length - MAX_EFFORT_ENTRIES)) delete next.efforts[key]
         }
       }
-      if (Array.isArray(src.recent)) next.recent = uniqueKeys(src.recent, MAX_RECENT)
       if (Array.isArray(src.favorites)) next.favorites = uniqueKeys(src.favorites, MAX_FAVORITES)
       if (src.prefs !== null && typeof src.prefs === 'object') {
         if (typeof src.prefs.picker === 'boolean') next.prefs.picker = src.prefs.picker
@@ -202,7 +204,7 @@ window.__ModuleLoader__.load({
     }
 
     function isEmptyState(state) {
-      return Object.keys(state.efforts).length === 0 && state.recent.length === 0 && state.favorites.length === 0
+      return Object.keys(state.efforts).length === 0 && state.favorites.length === 0
     }
 
     /** Host state wins on conflicts; local-only knowledge is kept so nothing is lost on first sync. */
@@ -211,7 +213,6 @@ window.__ModuleLoader__.load({
       return {
         version: 1,
         efforts: { ...local.efforts, ...server.efforts },
-        recent: server.recent.length > 0 ? server.recent : local.recent,
         favorites,
         prefs: { ...server.prefs },
       }
@@ -225,7 +226,6 @@ window.__ModuleLoader__.load({
         if (base.efforts[key] !== target.efforts[key]) efforts[key] = target.efforts[key]
       }
       if (Object.keys(efforts).length > 0) patch.efforts = efforts
-      if (JSON.stringify(base.recent) !== JSON.stringify(target.recent)) patch.recent = target.recent
       if (JSON.stringify(base.favorites) !== JSON.stringify(target.favorites)) patch.favorites = target.favorites
       if (base.prefs.picker !== target.prefs.picker || base.prefs.memory !== target.prefs.memory) patch.prefs = { ...target.prefs }
       return Object.keys(patch).length > 0 ? patch : null
@@ -273,7 +273,6 @@ window.__ModuleLoader__.load({
       const addPending = (part) => {
         const next = pending === null ? {} : pending
         if (part.efforts !== undefined) next.efforts = { ...(next.efforts || {}), ...part.efforts }
-        if (part.recent !== undefined) next.recent = part.recent
         if (part.favorites !== undefined) next.favorites = part.favorites
         if (part.prefs !== undefined) next.prefs = { ...(next.prefs || {}), ...part.prefs }
         pending = next
@@ -361,14 +360,6 @@ window.__ModuleLoader__.load({
         seed(key, value) {
           if (!validKey(key) || !validEffort(value)) return
           if (state.efforts[key] === undefined) this.setEffort(key, value)
-          if (!state.recent.includes(key) && state.recent.length === 0) this.touchRecent(key)
-        },
-        touchRecent(key) {
-          if (!validKey(key)) return
-          const recent = [key, ...state.recent.filter((entry) => entry !== key)].slice(0, MAX_RECENT)
-          if (JSON.stringify(recent) === JSON.stringify(state.recent)) return
-          const part = { recent }
-          commit(mergePatch(state, part), part)
         },
         toggleFavorite(key) {
           if (!validKey(key)) return false
@@ -383,11 +374,10 @@ window.__ModuleLoader__.load({
           const part = { prefs: { [name]: value } }
           commit(mergePatch(state, part), part)
         },
-        /** One call per successful selection: remember the effort and bump the model in Recent. */
+        /** One call per successful selection: remember the effort used with that model. */
         recordSelection(selection) {
           const key = keyOf(selection.provider, selection.model)
           this.setEffort(key, selection.reasoningEffort === undefined ? null : selection.reasoningEffort)
-          this.touchRecent(key)
         },
         /** Send what is still queued once, then stop timers for good. */
         dispose() {
@@ -620,12 +610,12 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * What the list shows. Without a query: Favorites, Recent, then the remaining models by
-     * provider (a model appears once). With a query: matches grouped by provider, best first.
+     * What the list shows. Without a query: Favorites, then the remaining models by provider (a
+     * model appears once). With a query: matches grouped by provider, best first.
      * `flat` is the keyboard order; every row carries its index in it.
      */
     function buildSections(input) {
-      const { groups, favorites, recent, query } = input
+      const { groups, favorites, query } = input
       const labelOf = typeof input.labelOf === 'function' ? input.labelOf : (group) => group.name
       const all = rowsOf(groups, labelOf)
       const byKey = new Map(all.map((row) => [row.key, row]))
@@ -644,21 +634,14 @@ window.__ModuleLoader__.load({
         }
       } else {
         const used = new Set()
-        const take = (keys, limit) => {
-          const rows = []
-          for (const key of keys) {
-            const row = byKey.get(key)
-            if (row === undefined || used.has(key)) continue
-            used.add(key)
-            rows.push(row)
-            if (rows.length >= limit) break
-          }
-          return rows
+        const favoriteRows = []
+        for (const key of favorites) {
+          const row = byKey.get(key)
+          if (row === undefined || used.has(key)) continue
+          used.add(key)
+          favoriteRows.push(row)
         }
-        const favoriteRows = take(favorites, MAX_FAVORITES)
         if (favoriteRows.length > 0) sections.push({ id: 'favorites', titleKey: 'group.favorites', showProvider: true, rows: favoriteRows })
-        const recentRows = take(recent, SHOWN_RECENT)
-        if (recentRows.length > 0) sections.push({ id: 'recent', titleKey: 'group.recent', showProvider: true, rows: recentRows })
         for (const group of groups) {
           const rows = all.filter((row) => row.groupId === group.id && !used.has(row.key))
           if (rows.length > 0) sections.push({ id: 'g:' + group.id, title: labelOf(group), rows })
@@ -895,7 +878,7 @@ body[data-ds-dark-theme] .mep-menu,body[data-ds-dark-theme] .mep-flyout{color:va
 .mep-kbd{display:inline-flex;gap:4px;flex:none}
 .mep-kbd span{display:inline-block;padding:0 5px;border-radius:4px;background:var(--dsw-alias-fill-tertiary,rgba(120,125,140,.14));color:var(--dsw-alias-label-secondary,#686c75);font-size:10px;line-height:16px;font-weight:600;letter-spacing:.02em}
 .mep-finfo{flex:none;padding:4px 10px 6px;color:var(--dsw-alias-label-tertiary,#9296a0);font-size:11px;line-height:16px}
-.mep-finfo>div{animation:mep-fade-in .18s ease-out}
+.mep-finfo>div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;animation:mep-fade-in .18s ease-out}
 @media (prefers-reduced-motion:reduce){.mep-finfo>div{animation:none}}
 .mep-setting{display:flex;flex-direction:column;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(121,126,145,.18))}
 .mep-setting-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 0;min-height:44px}
@@ -972,8 +955,8 @@ body[data-ds-dark-theme] .mep-menu,body[data-ds-dark-theme] .mep-flyout{color:va
       const memoryOn = mem.prefs.memory
 
       const built = useMemo(
-        () => buildSections({ groups, favorites: mem.favorites, recent: mem.recent, query, labelOf: (group) => providerLabel(group, t) }),
-        [groups, mem.favorites, mem.recent, query, t],
+        () => buildSections({ groups, favorites: mem.favorites, query, labelOf: (group) => providerLabel(group, t) }),
+        [groups, mem.favorites, query, t],
       )
       const flat = built.flat
       const hiIndex = hiKey === null ? -1 : flat.findIndex((row) => row.key === hiKey)
@@ -1226,8 +1209,8 @@ body[data-ds-dark-theme] .mep-menu,body[data-ds-dark-theme] .mep-flyout{color:va
           const downward = above < 300 && below > above
           const right = Math.min(Math.max(viewportWidth - rect.right, margin), Math.max(margin, viewportWidth - width - margin))
           const next = downward
-            ? { width, right, top: rect.bottom + 8, maxHeight: Math.max(220, Math.min(560, below)) }
-            : { width, right, bottom: viewportHeight - rect.top + 8, maxHeight: Math.max(220, Math.min(560, above)) }
+            ? { width, right, top: rect.bottom + 8, maxHeight: Math.max(220, Math.min(MENU_MAX_HEIGHT, below)) }
+            : { width, right, bottom: viewportHeight - rect.top + 8, maxHeight: Math.max(220, Math.min(MENU_MAX_HEIGHT, above)) }
           setPos((previous) =>
             previous !== null && previous.width === next.width && previous.right === next.right && previous.top === next.top && previous.bottom === next.bottom && previous.maxHeight === next.maxHeight
               ? previous
@@ -1280,9 +1263,20 @@ body[data-ds-dark-theme] .mep-menu,body[data-ds-dark-theme] .mep-flyout{color:va
         const height = fly.offsetHeight
         let left = menuRect.right + 3
         if (left + FLY_WIDTH > viewportWidth - margin) left = Math.max(margin, menuRect.left - FLY_WIDTH - 3)
+        const limitTop = Math.max(menuTop, margin)
+        const limitBottom = Math.min(menuBottom, viewportHeight - margin)
         let top = unscale(rowRect.top) - 6
-        top = Math.min(top, Math.min(menuBottom, viewportHeight - margin) - height)
-        top = Math.max(top, Math.max(menuTop, margin))
+        if (height <= limitBottom - limitTop) {
+          // Fits beside the menu: level with its row, inside the menu's vertical extent.
+          top = Math.min(top, limitBottom - height)
+          top = Math.max(top, limitTop)
+        } else {
+          // Taller than the menu (many effort levels, a short window): share the edge the menu grew from,
+          // the bottom one for an upward menu and the top one for a downward menu, and never leave the window.
+          top = pos.bottom !== undefined ? menuBottom - height : menuTop
+          top = Math.min(top, viewportHeight - margin - height)
+          top = Math.max(top, margin)
+        }
         // Sub-pixel tolerance: measuring mid-animation adds float noise, and an exact compare could
         // re-render forever on it.
         setFlyPos((previous) => (previous !== null && Math.abs(previous.left - left) < 0.5 && Math.abs(previous.top - top) < 0.5 ? previous : { left, top }))
@@ -1329,7 +1323,8 @@ body[data-ds-dark-theme] .mep-menu,body[data-ds-dark-theme] .mep-flyout{color:va
       const triggerTitle = effortLabel === undefined ? modelName : modelName + ' · ' + effortLabel
       const triggerAria = currentModel === undefined ? modelName : effortLabel === undefined ? t('trigger.aria', { model: modelName }) : t('trigger.ariaEffort', { model: modelName, effort: effortLabel })
 
-      const menuStyle = pos === null ? undefined : { width: pos.width, right: pos.right, top: pos.top, bottom: pos.bottom, maxHeight: pos.maxHeight }
+      const menuStyle =
+        pos === null ? undefined : { width: pos.width, right: pos.right, top: pos.top, bottom: pos.bottom, maxHeight: pos.maxHeight, minHeight: Math.min(MENU_MIN_HEIGHT, pos.maxHeight) }
       const activeId = zone === 'flyout' ? uid + '-fly-' + fi : hiSafe >= 0 ? uid + '-row-' + hiSafe : undefined
       const errorMessage =
         selectError !== null
@@ -1450,8 +1445,9 @@ body[data-ds-dark-theme] .mep-menu,body[data-ds-dark-theme] .mep-flyout{color:va
           h(
             'div',
             { key: 'info', className: 'mep-finfo', 'data-info-tick': infoTick },
-            h('div', null, contextText === null ? providerName : providerName + ' · ' + contextText),
-            modalityText === null ? null : h('div', null, modalityText),
+            // One line each (ellipsis, full text on hover): the flyout keeps its height from model to model.
+            h('div', { title: contextText === null ? providerName : providerName + ' · ' + contextText }, contextText === null ? providerName : providerName + ' · ' + contextText),
+            modalityText === null ? null : h('div', { title: modalityText }, modalityText),
           ),
         )
       }
@@ -1774,6 +1770,10 @@ body[data-ds-dark-theme] .mep-menu,body[data-ds-dark-theme] .mep-flyout{color:va
         SEAT_PRIORITY,
         ROUTE,
         STORAGE_KEY,
+        MENU_WIDTH,
+        MENU_MAX_HEIGHT,
+        MENU_MIN_HEIGHT,
+        FLY_WIDTH,
         CSS,
         ZH,
         EN,

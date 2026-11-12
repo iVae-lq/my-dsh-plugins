@@ -158,7 +158,40 @@ test('store: defaults are not written, so a State-only file keeps its original s
     await store.patch({ efforts: { 'x/y': 'low' } })
     await store.patchOptions({ quiet: true }) // unchanged
     await store.flush()
-    assert.deepEqual(Object.keys(JSON.parse(await readFile(join(dir, 'state.json'), 'utf8'))).sort(), ['efforts', 'favorites', 'prefs', 'recent', 'version'])
+    assert.deepEqual(Object.keys(JSON.parse(await readFile(join(dir, 'state.json'), 'utf8'))).sort(), ['efforts', 'favorites', 'prefs', 'version'])
+  })
+})
+
+test('store: a file written by an older version (with `recent`) loads, and its next write drops only that list', async () => {
+  await withTempDir(async (dir) => {
+    const legacy = {
+      version: 1,
+      efforts: { 'anthropic/claude-opus-5-5': 'high' },
+      recent: ['anthropic/claude-opus-5-5', 'openai/gpt-6.1-sol'],
+      favorites: ['openai/gpt-6.1-sol'],
+      prefs: { picker: true, memory: true },
+      options: { quiet: false },
+      lastSelection: { provider: 'anthropic', model: 'claude-opus-5-5', reasoningEffort: 'high' },
+      lastBasis: { provider: 'anthropic', model: 'claude-sonnet-5-5', reasoningEffort: 'max' },
+    }
+    await writeFile(join(dir, 'state.json'), JSON.stringify(legacy))
+    const store = newStore(dir)
+    const state = await store.read()
+    assert.deepEqual(state, { version: 1, efforts: legacy.efforts, favorites: legacy.favorites, prefs: legacy.prefs }, 'everything but `recent` is read')
+    assert.deepEqual(store.peek(), { options: { quiet: false }, lastSelection: legacy.lastSelection, basis: legacy.lastBasis })
+    await store.patch({ efforts: { 'openai/gpt-6.1-sol': 'low' } })
+    await store.flush()
+    const written = JSON.parse(await readFile(join(dir, 'state.json'), 'utf8'))
+    assert.equal(Object.hasOwn(written, 'recent'), false, 'the stale list is gone from the file')
+    assert.deepEqual(written, {
+      version: 1,
+      efforts: { 'anthropic/claude-opus-5-5': 'high', 'openai/gpt-6.1-sol': 'low' },
+      favorites: ['openai/gpt-6.1-sol'],
+      prefs: { picker: true, memory: true },
+      options: { quiet: false },
+      lastSelection: legacy.lastSelection,
+      lastBasis: legacy.lastBasis,
+    })
   })
 })
 
@@ -179,7 +212,7 @@ test('store: state patches never touch the options or the selection (the client 
     await store.saveLastSelection({ provider: 'a', model: 'b' })
     await store.patch({ lastSelection: { provider: 'evil', model: 'x' }, options: { quiet: false } })
     assert.deepEqual(store.peek(), { options: { quiet: true }, lastSelection: { provider: 'a', model: 'b' }, basis: null })
-    assert.deepEqual(Object.keys(await store.read()).sort(), ['efforts', 'favorites', 'prefs', 'recent', 'version'])
+    assert.deepEqual(Object.keys(await store.read()).sort(), ['efforts', 'favorites', 'prefs', 'version'])
     await store.flush() // queued writes must land before the temp dir goes away
   })
 })
@@ -201,7 +234,7 @@ test('route /options: read, patch, junk and the usual HTTP discipline', async ()
     assert.equal((await run(createHandler({ fence: () => false, store }), { url: OPTIONS_URL, body: {} })).status, 403)
     // the state route is untouched by all of this
     const state = await run(handler, { url: STATE_URL, body: {} })
-    assert.deepEqual(Object.keys(state.body.state).sort(), ['efforts', 'favorites', 'prefs', 'recent', 'version'])
+    assert.deepEqual(Object.keys(state.body.state).sort(), ['efforts', 'favorites', 'prefs', 'version'])
     await store.flush() // the options patch queued a write
   })
 })

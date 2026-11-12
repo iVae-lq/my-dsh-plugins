@@ -52,22 +52,27 @@ test('validKey: provider/model, model ids may contain slashes', () => {
 })
 
 test('normalizeState: garbage in, safe defaults out', () => {
-  for (const garbage of [undefined, null, 5, 'x', [], { efforts: 5, recent: 'x', favorites: {}, prefs: null }]) {
-    assert.deepEqual(T.normalizeState(garbage), { version: 1, efforts: {}, recent: [], favorites: [], prefs: { picker: true, memory: true } })
+  for (const garbage of [undefined, null, 5, 'x', [], { efforts: 5, favorites: {}, prefs: null }]) {
+    assert.deepEqual(T.normalizeState(garbage), { version: 1, efforts: {}, favorites: [], prefs: { picker: true, memory: true } })
   }
+})
+
+test('normalizeState: a leftover `recent` list from an older version is ignored, not carried', () => {
+  const state = T.normalizeState({ efforts: { 'a/b': 'high' }, recent: ['a/b', 'c/d'], favorites: ['a/b'] })
+  assert.deepEqual(Object.keys(state).sort(), ['efforts', 'favorites', 'prefs', 'version'])
+  assert.deepEqual(state.favorites, ['a/b'])
+  assert.equal(T.mergePatch(state, { recent: ['x/y'] }).recent, undefined, 'a stale patch cannot bring it back')
 })
 
 test('normalizeState: validates, dedupes and caps', () => {
   const state = T.normalizeState({
     efforts: { 'a/b': 'high', 'a/c': null, bad: 'low', 'a/d': 5, 'a/e': '', 'a/f': 'x'.repeat(65) },
-    recent: ['a/1', 'a/1', 'bad', 'a/2', ...Array.from({ length: 20 }, (_, i) => 'p/m' + i)],
-    favorites: Array.from({ length: 150 }, (_, i) => 'p/f' + i),
+    favorites: ['a/1', 'a/1', 'bad', 'a/2', ...Array.from({ length: 150 }, (_, i) => 'p/f' + i)],
     prefs: { picker: false, memory: 'no' },
   })
   assert.deepEqual(state.efforts, { 'a/b': 'high', 'a/c': null })
-  assert.equal(state.recent.length, 8)
-  assert.deepEqual(state.recent.slice(0, 2), ['a/1', 'a/2'])
   assert.equal(state.favorites.length, 100)
+  assert.deepEqual(state.favorites.slice(0, 2), ['a/1', 'a/2'], 'first-seen order, duplicates and bad keys dropped')
   assert.deepEqual(state.prefs, { picker: false, memory: true }, 'only a real boolean false disables')
 })
 
@@ -77,13 +82,13 @@ test('normalizeState: at most 500 effort entries', () => {
 })
 
 test('mergePatch: efforts merge, nulls kept, lists replaced, prefs partial, input untouched', () => {
-  const base = T.normalizeState({ efforts: { 'a/b': 'low' }, recent: ['a/b'], favorites: ['a/b'] })
+  const base = T.normalizeState({ efforts: { 'a/b': 'low' }, favorites: ['a/b'] })
   const frozen = JSON.stringify(base)
-  const next = T.mergePatch(base, { efforts: { 'a/b': null, 'c/d': 'max', bad: 'x' }, recent: ['c/d', 'a/b'], prefs: { memory: false, junk: 1 } })
+  const next = T.mergePatch(base, { efforts: { 'a/b': null, 'c/d': 'max', bad: 'x' }, prefs: { memory: false, junk: 1 } })
   assert.equal(JSON.stringify(base), frozen)
   assert.deepEqual(next.efforts, { 'a/b': null, 'c/d': 'max' })
-  assert.deepEqual(next.recent, ['c/d', 'a/b'])
   assert.deepEqual(next.favorites, ['a/b'], 'absent list is kept')
+  assert.deepEqual(T.mergePatch(base, { favorites: ['c/d', 'c/d', 'bad'] }).favorites, ['c/d'], 'a present list replaces, normalized')
   assert.deepEqual(next.prefs, { picker: true, memory: false })
   assert.deepEqual(T.mergePatch(base, undefined), base)
 })
@@ -99,11 +104,10 @@ test('mergePatch: the oldest effort entries are evicted past 500', () => {
 })
 
 test('mergeStates / diffToPatch / isEmptyState', () => {
-  const server = T.normalizeState({ efforts: { 'a/b': 'high' }, recent: ['a/b'], favorites: ['a/b'], prefs: { picker: false } })
-  const local = T.normalizeState({ efforts: { 'a/b': 'low', 'c/d': 'max' }, recent: ['c/d'], favorites: ['c/d'] })
+  const server = T.normalizeState({ efforts: { 'a/b': 'high' }, favorites: ['a/b'], prefs: { picker: false } })
+  const local = T.normalizeState({ efforts: { 'a/b': 'low', 'c/d': 'max' }, favorites: ['c/d'] })
   const merged = T.mergeStates(server, local)
   assert.deepEqual(merged.efforts, { 'a/b': 'high', 'c/d': 'max' }, 'server wins conflicts, local-only is kept')
-  assert.deepEqual(merged.recent, ['a/b'])
   assert.deepEqual(merged.favorites, ['a/b', 'c/d'])
   assert.equal(merged.prefs.picker, false)
   assert.equal(T.diffToPatch(merged, merged), null)
@@ -141,13 +145,14 @@ test('store: writes local storage at once, batches remote patches', async () => 
   const store = T.createMemoryStore({ storage, remote, debounceMs: 5 })
   store.setEffort('a/b', 'high')
   store.setEffort('c/d', 'low')
-  store.touchRecent('a/b')
+  store.toggleFavorite('a/b')
   assert.equal(JSON.parse(storage.peek()).efforts['a/b'], 'high', 'persisted locally before any network')
   assert.equal(remote.calls.length, 0)
   await tick(30)
   assert.equal(remote.calls.length, 1, 'one batched call')
   assert.deepEqual(remote.calls[0].efforts, { 'a/b': 'high', 'c/d': 'low' })
-  assert.deepEqual(remote.calls[0].recent, ['a/b'])
+  assert.deepEqual(remote.calls[0].favorites, ['a/b'])
+  assert.equal('recent' in remote.calls[0], false, 'nothing about a recent list is ever sent')
   store.dispose()
 })
 
@@ -159,24 +164,22 @@ test('store: no-op writes do not emit or hit storage', () => {
   store.setEffort('a/b', 'high')
   const writes = storage.writes
   store.setEffort('a/b', 'high')
-  store.touchRecent('a/b')
-  store.touchRecent('a/b')
   store.setPref('picker', true)
   store.setEffort('bad', 'high')
   store.setEffort('a/b', '')
-  assert.equal(storage.writes, writes + 1, 'only touchRecent(first) wrote')
-  assert.equal(emitted, 2)
+  assert.equal(storage.writes, writes, 'nothing was written')
+  assert.equal(emitted, 1, 'only the first real change emitted')
   store.dispose()
 })
 
-test('store: recordSelection remembers effort (null for none) and bumps recent', () => {
+test('store: recordSelection remembers effort (null for none)', () => {
   const store = T.createMemoryStore({ storage: fakeStorage(), remote: null })
   store.recordSelection({ provider: 'a', model: 'b', reasoningEffort: 'high' })
   store.recordSelection({ provider: 'c', model: 'd' })
   store.recordSelection({ provider: 'a', model: 'b', reasoningEffort: 'low' })
   const s = store.getSnapshot()
   assert.deepEqual(s.efforts, { 'a/b': 'low', 'c/d': null })
-  assert.deepEqual(s.recent, ['a/b', 'c/d'])
+  assert.equal('recent' in s, false)
   store.dispose()
 })
 
@@ -198,9 +201,8 @@ test('store: seed only fills what is unknown', () => {
   store.seed('a/b', 'max')
   store.seed('a/b', 'low')
   assert.equal(store.getSnapshot().efforts['a/b'], 'max')
-  assert.deepEqual(store.getSnapshot().recent, ['a/b'], 'first seed also fills an empty recent list')
   store.seed('c/d', null)
-  assert.deepEqual(store.getSnapshot().recent, ['a/b'], 'recent is not rewritten once it has entries')
+  assert.deepEqual(store.getSnapshot().efforts, { 'a/b': 'max', 'c/d': null })
   store.dispose()
 })
 
@@ -214,13 +216,12 @@ test('store: starts from local storage and tolerates corrupt content', () => {
 
 test('store.hydrate: host state wins, local-only knowledge is pushed back', async () => {
   const storage = fakeStorage(JSON.stringify({ efforts: { 'a/b': 'low', 'c/d': 'max' }, favorites: ['c/d'] }))
-  const remote = fakeRemote({ server: T.normalizeState({ efforts: { 'a/b': 'high' }, recent: ['a/b'] }) })
+  const remote = fakeRemote({ server: T.normalizeState({ efforts: { 'a/b': 'high' } }) })
   const store = T.createMemoryStore({ storage, remote, debounceMs: 5 })
   await store.hydrate()
   const s = store.getSnapshot()
   assert.deepEqual(s.efforts, { 'a/b': 'high', 'c/d': 'max' })
   assert.deepEqual(s.favorites, ['c/d'])
-  assert.deepEqual(s.recent, ['a/b'])
   await tick(30)
   assert.deepEqual(remote.server().efforts, { 'a/b': 'high', 'c/d': 'max' }, 'host learned the local-only entry')
   assert.deepEqual(JSON.parse(storage.peek()).efforts, { 'a/b': 'high', 'c/d': 'max' })
@@ -290,37 +291,36 @@ test('matchScore: prefix < substring < subsequence; every token must match', () 
   assert.ok(T.matchScore('anthro', row('Claude Sonnet 5.5')) >= 0, 'provider name is searchable')
 })
 
-test('buildSections: favorites, recent, then providers; no duplicates; flat order matches', () => {
+test('buildSections: favorites first, then providers; no duplicates; flat order matches', () => {
   const { sections, flat } = T.buildSections({
     groups: GROUPS,
-    favorites: ['openai/gpt-5.5', 'ghost/none'],
-    recent: ['anthropic/claude-sonnet-5-5', 'openai/gpt-5.5', 'xai/grok-4.7'],
+    favorites: ['openai/gpt-5.5', 'ghost/none', 'openai/gpt-5.5', 'xai/grok-4.7'],
     query: '',
   })
-  assert.deepEqual(sections.map((s) => s.id), ['favorites', 'recent', 'g:anthropic', 'g:openai'])
-  assert.deepEqual(sections[0].rows.map((r) => r.key), ['openai/gpt-5.5'])
-  assert.deepEqual(sections[1].rows.map((r) => r.key), ['anthropic/claude-sonnet-5-5', 'xai/grok-4.7'], 'favorite not repeated in recent')
-  assert.deepEqual(sections[2].rows.map((r) => r.key), ['anthropic/claude-opus-5-5'])
-  assert.deepEqual(sections[3].rows.map((r) => r.key), ['openai/odd'], 'xai has nothing left so its group is omitted')
+  assert.deepEqual(sections.map((s) => s.id), ['favorites', 'g:anthropic', 'g:openai'])
+  assert.deepEqual(sections[0].rows.map((r) => r.key), ['openai/gpt-5.5', 'xai/grok-4.7'], 'unknown and repeated favorites are skipped')
+  assert.deepEqual(sections[1].rows.map((r) => r.key), ['anthropic/claude-sonnet-5-5', 'anthropic/claude-opus-5-5'], 'favorites are not repeated under their provider')
+  assert.deepEqual(sections[2].rows.map((r) => r.key), ['openai/odd'])
   assert.deepEqual(flat.map((r) => r.index), flat.map((_, i) => i))
   assert.equal(new Set(flat.map((r) => r.key)).size, flat.length)
-  assert.equal(sections[1].showProvider, true)
+  assert.equal(sections[0].showProvider, true, 'a favorite row names its provider')
+  assert.ok(sections.slice(1).every((s) => s.showProvider !== true))
 })
 
-test('buildSections: only five recent are shown; empty catalog gives nothing', () => {
+test('buildSections: there is no "recent" section, whatever a caller passes; an empty catalog gives nothing', () => {
   const many = { id: 'p', name: 'P', models: Array.from({ length: 9 }, (_, i) => ({ id: 'm' + i, name: 'M' + i })) }
   const built = T.buildSections({ groups: [many], favorites: [], recent: many.models.map((m) => 'p/' + m.id), query: '' })
-  assert.equal(built.sections[0].id, 'recent')
-  assert.equal(built.sections[0].rows.length, 5)
+  assert.deepEqual(built.sections.map((s) => s.id), ['g:p'])
   assert.equal(built.flat.length, 9)
-  assert.deepEqual(T.buildSections({ groups: [], favorites: [], recent: [], query: '' }), { sections: [], flat: [] })
+  assert.ok(!('group.recent' in T.ZH) && !('group.recent' in T.EN), 'no dictionary entry is left over')
+  assert.deepEqual(T.buildSections({ groups: [], favorites: [], query: '' }), { sections: [], flat: [] })
 })
 
 test('buildSections: a query lists matches grouped by provider, best first', () => {
-  const built = T.buildSections({ groups: GROUPS, favorites: ['openai/gpt-5.5'], recent: ['xai/grok-4.7'], query: '5.5' })
-  assert.deepEqual(built.sections.map((s) => s.id), ['g:anthropic', 'g:openai'], 'favorites/recent are not special while searching')
+  const built = T.buildSections({ groups: GROUPS, favorites: ['openai/gpt-5.5'], query: '5.5' })
+  assert.deepEqual(built.sections.map((s) => s.id), ['g:anthropic', 'g:openai'], 'favorites are not special while searching')
   assert.deepEqual(built.flat.map((r) => r.key), ['anthropic/claude-sonnet-5-5', 'anthropic/claude-opus-5-5', 'openai/gpt-5.5'])
-  assert.deepEqual(T.buildSections({ groups: GROUPS, favorites: [], recent: [], query: 'zzzz' }).flat, [])
+  assert.deepEqual(T.buildSections({ groups: GROUPS, favorites: [], query: 'zzzz' }).flat, [])
 })
 
 test('plannedEffort: current model keeps its effort, others use memory only when still offered', () => {
@@ -360,14 +360,14 @@ test('providerLabel: the bare id is prettified, a configured name is respected, 
 test('buildSections: titles and provider names come from labelOf, and the raw provider id is still searchable', () => {
   const groups = [{ id: 'anthropic', name: 'anthropic', models: [{ id: 'm1', name: 'Alpha' }] }, { id: 'openai', name: 'openai', models: [{ id: 'm2', name: 'Beta' }] }]
   const labelOf = (group) => ({ anthropic: 'Anthropic', openai: 'OpenAI' })[group.id]
-  const plain = T.buildSections({ groups, favorites: ['openai/m2'], recent: [], query: '', labelOf })
+  const plain = T.buildSections({ groups, favorites: ['openai/m2'], query: '', labelOf })
   assert.deepEqual(plain.sections.map((s) => s.title ?? s.titleKey), ['group.favorites', 'Anthropic'])
   assert.equal(plain.sections[0].rows[0].provider.name, 'OpenAI', 'favorites rows show the pretty provider')
-  const byId = T.buildSections({ groups, favorites: [], recent: [], query: 'anthropic', labelOf: (group) => 'Acme ' + group.id })
+  const byId = T.buildSections({ groups, favorites: [], query: 'anthropic', labelOf: (group) => 'Acme ' + group.id })
   assert.deepEqual(byId.flat.map((r) => r.key), ['anthropic/m1'], 'the raw id still matches when the label differs')
-  const byLabel = T.buildSections({ groups, favorites: [], recent: [], query: 'acme ope', labelOf: (group) => 'Acme ' + group.id })
+  const byLabel = T.buildSections({ groups, favorites: [], query: 'acme ope', labelOf: (group) => 'Acme ' + group.id })
   assert.deepEqual(byLabel.flat.map((r) => r.key), ['openai/m2'], 'and so does the label')
-  assert.deepEqual(T.buildSections({ groups, favorites: [], recent: [], query: '' }).sections.map((s) => s.title), ['anthropic', 'openai'], 'without labelOf the catalog names are used')
+  assert.deepEqual(T.buildSections({ groups, favorites: [], query: '' }).sections.map((s) => s.title), ['anthropic', 'openai'], 'without labelOf the catalog names are used')
 })
 
 test('formatContext falls back to the raw number', () => {
@@ -459,7 +459,6 @@ test('patch: records only successful selections; failures are returned untouched
   dir.result = { ok: true, value: undefined }
   await dir.select({ provider: 'openai', model: 'gpt-5.5', reasoningEffort: 'high' })
   assert.equal(memory.getSnapshot().efforts['openai/gpt-5.5'], 'high')
-  assert.equal(memory.getSnapshot().recent[0], 'openai/gpt-5.5')
   memory.dispose()
 })
 
@@ -667,6 +666,21 @@ test('motion: the pointer is tracked without delay or smoothing; only open/close
   // reduced motion switches the open/close animation off
   const reduced = css.split('@media (prefers-reduced-motion:reduce)').slice(1).join('\n')
   assert.match(reduced, /\.mep-menu\[data-leaving\],\.mep-flyout\[data-leaving\]\{animation:none\}/)
+})
+
+test('size: a compact portrait menu (340 wide, 300..480 tall) with a 184 wide flyout, sized from the content', () => {
+  assert.equal(T.MENU_WIDTH, 340, 'a typical row needs ~300px, the widest realistic one ~360px (the name ellipsizes)')
+  assert.equal(T.MENU_MAX_HEIGHT, 480)
+  assert.equal(T.FLY_WIDTH, 184, 'its widest row ("Unfavorite" + CTRL F) needs ~160px plus 12px of padding')
+  // the shape stays portrait and pleasant at both ends of the height range, and the flyout stays slimmer than the menu
+  assert.ok(T.MENU_WIDTH / T.MENU_MAX_HEIGHT >= 0.62 && T.MENU_WIDTH / T.MENU_MAX_HEIGHT <= 0.8, 'ratio at full height')
+  assert.ok(T.MENU_MIN_HEIGHT >= 290, 'a short result list must still hold the tallest usual flyout (290px)')
+  assert.ok(T.MENU_MIN_HEIGHT < T.MENU_MAX_HEIGHT)
+  assert.ok(T.FLY_WIDTH < T.MENU_WIDTH * 0.6)
+  assert.match(T.CSS, new RegExp('\\.mep-flyout\\{[^}]*width:' + T.FLY_WIDTH + 'px'), 'the stylesheet uses the same flyout width')
+  // one line each in the flyout footer, so its height does not change from model to model
+  assert.match(T.CSS, /\.mep-finfo>div\{[^}]*white-space:nowrap/)
+  assert.match(T.CSS, /\.mep-finfo>div\{[^}]*text-overflow:ellipsis/)
 })
 
 test('apply: registers the seat below the native priority, the settings rows, dictionaries and styles', () => {
